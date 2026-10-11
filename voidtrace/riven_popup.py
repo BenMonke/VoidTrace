@@ -15,8 +15,20 @@ from PyQt6.QtCore import QObject, QRect, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from . import theme
 from .icons import draw_amount, platinum_icon, voidtrace_logo
-from .rivens import PriceCheck, RivenCatalog, RivenDraft, attr_rolls, grade, price_check, riven_grade
+from .rivens import (
+    PriceCheck,
+    RivenCatalog,
+    RivenDraft,
+    attr_rolls,
+    grade,
+    grade_from_percent,
+    grade_letter,
+    grading_weapon,
+    price_check,
+    riven_grade,
+)
 
 if TYPE_CHECKING:
     from .rivens import RivenService
@@ -25,7 +37,6 @@ log = logging.getLogger(__name__)
 
 WIDTH = 330
 PANEL = QColor(11, 18, 32, 238)
-BORDER = QColor(79, 163, 255)
 TEXT = QColor(230, 238, 251)
 MUTED = QColor(143, 163, 194)
 BUFF = QColor(124, 201, 156)
@@ -39,12 +50,15 @@ def grade_color(value: int) -> QColor:
 
 
 class GradeBar(QWidget):
-    """A thin bar filled to the stat's grade, with the number beside it."""
+    """A thin bar filled to the stat's grade (0-100% of its range), with its letter beside it."""
 
-    def __init__(self, value: Optional[int]) -> None:
+    def __init__(self, value: Optional[int], letter: Optional[str] = None) -> None:
         super().__init__()
         self.value = value
+        self.letter = letter
         self.setFixedSize(92, 16)
+        if value is not None:
+            self.setToolTip(f"{value}% of the way from the worst possible roll to the best")
 
     def paintEvent(self, _event) -> None:  # noqa: N802
         if self.value is None:
@@ -59,7 +73,8 @@ class GradeBar(QWidget):
         p.drawRoundedRect(QRectF(bar.x(), bar.y(), max(4.0, bar.width() * self.value / 100), bar.height()), 3, 3)
         p.setPen(grade_color(self.value))
         p.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
-        p.drawText(QRect(60, 0, 32, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, f"{self.value}%")
+        p.drawText(QRect(60, 0, 32, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                   self.letter or f"{self.value}%")
         p.end()
 
 
@@ -82,7 +97,7 @@ class PriceLine(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         font = QFont("Segoe UI", 15, QFont.Weight.DemiBold)
         draw_amount(p, self.rect(), platinum_icon(20, self.devicePixelRatioF()), self.text, font,
-                    QColor(140, 200, 255), Qt.AlignmentFlag.AlignLeft)
+                    theme.accent().lighter(130), Qt.AlignmentFlag.AlignLeft)
         p.end()
 
 
@@ -134,25 +149,28 @@ class RivenPopup(QWidget):
         """Fill in the riven; the price follows with show_price()."""
         self.draft, self.check = draft, None
         self._clear()
-        weapon = catalog.by_weapon.get(draft.weapon)
+        weapon = grading_weapon(catalog, draft)
         title = f"{weapon.name if weapon else draft.weapon} {draft.name[:1].upper()}{draft.name[1:]}".strip()
         self.body.addLayout(self._header(title or "Riven"))
-        legend = self._label("Bars: how well each stat rolled, within what this riven can roll", MUTED, 8)
+        legend = self._label("Roll grades: A+ best · B+ average · C worst (how well each stat rolled)", MUTED, 8)
         legend.setWordWrap(True)
         self.body.addWidget(legend)
         rolls = attr_rolls(catalog, weapon, draft.attrs, draft.rank) if weapon else [None] * len(draft.attrs)
         for attr, roll in zip(draft.attrs, rolls):
             g = grade(roll) if roll is not None and 0.85 <= roll <= 1.15 else None
+            letter = grade_letter(roll, attr.positive) if g is not None else None
             if g is not None and not attr.positive:
                 g = 100 - g  # a smaller curse is the better roll
             row = QHBoxLayout()
             row.addWidget(self._label(catalog.format_attr(attr), BUFF if attr.positive else CURSE, 10), 1)
-            row.addWidget(GradeBar(g))
+            row.addWidget(GradeBar(g, letter))
             self.body.addLayout(row)
         overall = riven_grade(catalog, weapon, draft.attrs, draft.rank) if weapon else None
         if overall is not None:
-            self.body.addWidget(self._label(f"Overall roll {overall}%  (0% = worst possible, 100% = best)", TEXT, 9))
+            self.body.addWidget(self._label(f"Overall roll: {grade_from_percent(overall)}", TEXT, 10, bold=True))
         meta = f"MR {draft.mr} · {draft.rolls} rolls · rank {draft.rank} · {draft.polarity.title()}"
+        if draft.shown_for and weapon is not None and draft.shown_for.lower() != weapon.name.lower():
+            meta += f"\nValues as shown for {draft.shown_for} (riven strength {draft.shown_disposition:g})"
         self.body.addWidget(self._label(meta, MUTED, 9))
         self.price.set_text("")
         self.price_detail.setText("Checking listings…")
@@ -214,7 +232,7 @@ class RivenPopup(QWidget):
     def paintEvent(self, _event) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(BORDER, 1.5))
+        p.setPen(QPen(theme.accent(), 1.5))
         p.setBrush(PANEL)
         p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 10, 10)
         p.end()
@@ -300,7 +318,7 @@ class RivenAssistant(QObject):
 
         def work():
             _, service = self.data()
-            weapon = catalog.by_weapon.get(draft.weapon)
+            weapon = grading_weapon(catalog, draft)
             mine = riven_grade(catalog, weapon, draft.attrs, draft.rank) if weapon else None
             return price_check(service.search(draft.weapon), draft.positives, draft.negative, exclude_seller=me,
                                catalog=catalog, my_grade=mine)
