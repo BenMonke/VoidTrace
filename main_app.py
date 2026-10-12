@@ -295,8 +295,11 @@ def main(argv: Optional[list[str]] = None) -> int:
                 riven_data_cache["service"] = RivenService(market.sellers.client)
             return riven_data_cache["catalog"], riven_data_cache["service"]
 
+    from voidtrace.discord import DiscordNotifier
+
+    discord = DiscordNotifier()
     window = MainWindow(market, RelicSection(reward_items, pipeline.prices), riven_data,
-                        lambda data: RivenSection(*data, account=market.account))
+                        lambda data: RivenSection(*data, account=market.account), discord=discord)
 
     def riven_hotkey() -> None:
         """Ctrl+Shift+R: in game, read the riven on screen (Item Details view); else just open Rivens."""
@@ -350,6 +353,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     trades = trade_toast.TradeTracker(market.account, market.catalog, trade_toast.TradeToast(screen.geometry()),
                                       on_orders_changed=refresh_my_orders)
     trades.recorded.connect(market.trades_panel.add)
+    from voidtrace.trades import summary as trade_summary
+
+    trades.recorded.connect(lambda record: discord.send(
+        "trades", "\U0001f91d Trade done", trade_summary(record.trade, [])))
 
     status_keeper = online_status.StatusKeeper(
         lambda: market.account.token if market.account.signed_in else None,
@@ -391,6 +398,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         pending_whisper["text"] = whisper_text(seller, alert.name, ranked=alert.ranked)
         tray.showMessage(f"{alert.label}: {seller.platinum}p from {seller.ingame_name}",
                          "Click here to copy the whisper, then paste it in game chat.", app_icon(), 10000)
+        discord.send("alerts", f"\U0001f514 {alert.label}: {seller.platinum}p",
+                     f"from **{seller.ingame_name}**\n`{pending_whisper['text']}`")
+
 
     def tray_message_clicked() -> None:
         text = pending_whisper.pop("text", None)
@@ -437,6 +447,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         riven_assistant.shutdown()
         trades.shutdown()
         alert_watcher.shutdown()
+        discord.shutdown()
         status_keeper.stop()
         hotkey.unregister()
         hotkey.unregister(hotkey.RIVEN_HOTKEY_ID)
