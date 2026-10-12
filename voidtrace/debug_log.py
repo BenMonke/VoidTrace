@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import queue
 import struct
 import sys
 import threading
@@ -57,30 +58,41 @@ def running_processes() -> Iterator[tuple[int, str]]:
     (EnumProcesses + QueryFullProcessImageNameW). Processes it may not open are skipped."""
     if sys.platform != "win32":
         return
-    psapi, kernel32 = ctypes.WinDLL("psapi"), ctypes.WinDLL("kernel32")
+    psapi = ctypes.WinDLL("psapi")
+    pids = (wintypes.DWORD * 4096)()
+    used = wintypes.DWORD()
+    if not psapi.EnumProcesses(pids, ctypes.sizeof(pids), ctypes.byref(used)):
+        return
+    for pid in pids[: used.value // ctypes.sizeof(wintypes.DWORD)]:
+        name = process_name(int(pid))
+        if name:
+            yield int(pid), name
+
+
+def process_name(pid: int) -> str:
+    """The exe file name of one process ("Warframe.x64.exe"), or "" when it cannot be read."""
+    if sys.platform != "win32" or not pid:
+        return ""
+    kernel32 = ctypes.WinDLL("kernel32")
     kernel32.OpenProcess.restype = wintypes.HANDLE
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
                                                     ctypes.POINTER(wintypes.DWORD)]
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    pids = (wintypes.DWORD * 4096)()
-    used = wintypes.DWORD()
-    if not psapi.EnumProcesses(pids, ctypes.sizeof(pids), ctypes.byref(used)):
-        return
-    name = ctypes.create_unicode_buffer(1024)
-    for pid in pids[: used.value // ctypes.sizeof(wintypes.DWORD)]:
-        try:
-            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        except (OSError, ctypes.ArgumentError):
-            continue
-        if not handle:
-            continue
-        try:
-            size = wintypes.DWORD(len(name))
-            if kernel32.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(size)):
-                yield int(pid), name.value.rsplit("\\", 1)[-1]
-        finally:
-            kernel32.CloseHandle(handle)
+    try:
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    except (OSError, ctypes.ArgumentError):
+        return ""
+    if not handle:
+        return ""
+    try:
+        name = ctypes.create_unicode_buffer(1024)
+        size = wintypes.DWORD(len(name))
+        if kernel32.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(size)):
+            return name.value.rsplit("\\", 1)[-1]
+        return ""
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def find_warframe_pid(processes: Optional[Callable[[], Iterable[tuple[int, str]]]] = None) -> Optional[int]:
@@ -156,7 +168,12 @@ class _Win32Channel:
 
 
 class DebugLogSource:
-    """Line source with the same shape as LogTailer: poll() and lines(stop_event)."""
+    """Line source with the same shape as LogTailer: poll() and lines(stop_event).
+
+    Every program that writes debug output (Warframe included) waits after each message until the
+    listener has taken it. So a dedicated thread does nothing but take messages and queue them;
+    parsing and everything else happen in poll(). Without it the game froze while VoidTrace was
+    busy (handling a batch, starting up)."""
 
     blocks = True  # poll() waits up to poll_interval itself; callers need not sleep
 
@@ -173,6 +190,16 @@ class DebugLogSource:
         self._pid_checked = 0.0
         self._partial = ""
         self.messages_seen = 0
+        self._queue: queue.SimpleQueue[bytes] = queue.SimpleQueue()
+        self._stop = threading.Event()
+        self._collector = threading.Thread(target=self._collect, name="VoidTrace-DebugOutput", daemon=True)
+        self._collector.start()
+
+    def _collect(self) -> None:
+        while not self._stop.is_set():
+            raw = self._channel.wait(200)
+            if raw is not None:
+                self._queue.put(raw)
 
     def _warframe_pid(self) -> Optional[int]:
         now = time.monotonic()
@@ -186,9 +213,9 @@ class DebugLogSource:
         out: list[str] = []
         deadline = time.monotonic() + self.poll_interval
         while True:
-            remaining_ms = max(0, int((deadline - time.monotonic()) * 1000))
-            raw = self._channel.wait(remaining_ms)
-            if raw is None:
+            try:
+                raw = self._queue.get(timeout=max(0.0, deadline - time.monotonic()))
+            except queue.Empty:
                 break
             pid, text = parse_message(raw)
             if pid != self._warframe_pid():
@@ -204,4 +231,6 @@ class DebugLogSource:
             yield from self.poll()
 
     def close(self) -> None:
+        self._stop.set()
+        self._collector.join(1.0)
         self._channel.close()
