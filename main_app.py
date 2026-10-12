@@ -147,7 +147,7 @@ def app_icon() -> QIcon:
 
 
 def make_tray(app: QApplication, open_window, game_log_status=lambda: None, toggle_riven_popup=None,
-              toggle_trade_updates=None, toggle_online_status=None) -> QSystemTrayIcon:
+              toggle_trade_updates=None, toggle_online_status=None, add_shortcuts=None) -> QSystemTrayIcon:
     """The tray icon: click it to open VoidTrace; right-click for the toggles and the rest."""
     from voidtrace.ui.main_window import accent_menu
 
@@ -166,6 +166,8 @@ def make_tray(app: QApplication, open_window, game_log_status=lambda: None, togg
             action.setChecked(on)
             action.toggled.connect(toggle)
     menu.addMenu(accent_menu(menu))
+    if add_shortcuts is not None:
+        menu.addAction("Add Desktop and Start menu shortcuts", add_shortcuts)
     menu.addSeparator()
     menu.addAction("Run self-test", lambda: show_self_test(game_log_status()))
     menu.addAction("Open log folder", lambda: _open_folder(app_support.log_path().parent))
@@ -381,10 +383,24 @@ def main(argv: Optional[list[str]] = None) -> int:
         return ("FAIL: using the slower log file: another program (WFInfo, Overwolf, DebugView) "
                 "was reading the game's log when VoidTrace started")
 
-    tray = make_tray(app, window.open_page, game_log_status, toggle_riven_popup, toggle_trade_updates, toggle_online_status)
+    exe = Path(sys.executable) if getattr(sys, "frozen", False) else None  # shortcuts only for the packaged app
+
+    def add_shortcuts() -> None:
+        done = app_support.create_shortcuts(exe)
+        tray.showMessage("VoidTrace", "Shortcuts added: on your Desktop and in the Start menu." if done else
+                         "Could not add the shortcuts (see the log folder).", app_icon(), 5000)
+
+    tray = make_tray(app, window.open_page, game_log_status, toggle_riven_popup, toggle_trade_updates, toggle_online_status,
+                     add_shortcuts if exe else None)
     status_keeper.changed.connect(lambda text: tray.setToolTip(f"VoidTrace\n{text}"))
     status_keeper.start()
     riven_watcher.start()
+    if exe and not settings.get("shortcut_asked"):
+        settings.put("shortcut_asked", True)
+        answer = QMessageBox.question(None, "VoidTrace", "Put a VoidTrace shortcut on your Desktop and in the Start "
+                                      "menu?\n\nYou can also add them later from the tray icon menu.")
+        if answer == QMessageBox.StandardButton.Yes:
+            add_shortcuts()
     if first_launch:
         window.open_page("market/buy")  # a new user sees the app, not just an icon in the tray
     tray.showMessage("VoidTrace is running",
