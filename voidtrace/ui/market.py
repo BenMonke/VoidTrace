@@ -1,7 +1,7 @@
-"""Market window: search any item, see who is selling it right now, click a seller to copy the whisper,
-and (signed in) post and manage your own Warframe.Market orders.
+"""The Market section of the main window: search any item and see who sells it right now (click a seller
+to copy the whisper), post and manage your orders, your trade history, and price alerts.
 
-A normal clickable window (unlike the overlay), kept on top of Borderless Fullscreen Warframe.
+Pages: Buy (here), Sell and My orders (orders.py), Trades (trades.py), Alerts (alerts.py).
 """
 
 from __future__ import annotations
@@ -9,10 +9,9 @@ from __future__ import annotations
 import html
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Sequence
 
-from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -26,104 +25,23 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QPushButton,
-    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
-from rapidfuzz import fuzz, process, utils
 
-from . import theme
-from .account import Account
-from .icons import platinum_icon
-from .items import CatalogItem
-from .sellers import SellerOrder, SellerService, rank_counts, whisper_text
+from ..account import Account
+from ..icons import platinum_icon
+from ..items import CatalogItem
+from ..sellers import SellerOrder, SellerService, rank_counts, whisper_text
+from ..search import search_catalog
+from .widgets import STATUS_COLOR, STATUS_LABEL, Section
 
 log = logging.getLogger(__name__)
 
-STYLE = """
-QWidget { background: #0b1220; color: #e6eefb; font-family: 'Segoe UI'; font-size: 13px; }
-QLineEdit, QComboBox { background: #111a2e; border: 1px solid #22314f; border-radius: 4px; padding: 5px 8px; }
-QLineEdit:focus { border-color: #4fa3ff; }
-QListWidget { background: #111a2e; border: 1px solid #22314f; }
-QListWidget::item:selected { background: #22314f; }
-QTableWidget { background: #0b1220; border: none; gridline-color: #16213a; }
-QTableWidget::item { padding: 4px; }
-QTableWidget::item:hover { background: #16213a; }
-QHeaderView::section { background: #0b1220; color: #8fa3c2; border: none; border-bottom: 1px solid #22314f;
-                       padding: 6px; font-size: 11px; font-weight: 600; }
-QLabel#title { font-size: 18px; font-weight: 600; }
-QLabel#toast { color: #7cc99c; }
-QLabel#muted { color: #8fa3c2; }
-QTabWidget::pane { border: none; border-top: 1px solid #22314f; }
-QTabBar::tab { background: #0b1220; color: #8fa3c2; padding: 7px 14px; border: none; }
-QTabBar::tab:selected { color: #e6eefb; border-bottom: 2px solid #4fa3ff; }
-QPushButton#account { background: #111a2e; border: 1px solid #22314f; border-radius: 4px; padding: 5px 10px; }
-"""
 
 COLUMNS = ["Seller", "Status", "Rank", "Price", "Qty", "Rep"]
-STATUS_LABEL = {"ingame": "In game", "online": "Online"}
-STATUS_COLOR = {"ingame": QColor(124, 201, 156), "online": QColor(120, 185, 255)}
-MAX_SUGGESTIONS = 8
-
-
-# Short forms players type in trade chat.
-TYPO_MIN = 70  # per-word similarity needed to count as a typo of that word
-ALIASES = {"bp": "blueprint", "sys": "systems", "neuro": "neuroptics", "chas": "chassis", "rec": "receiver"}
-
-
-def _words(text: str) -> list[str]:
-    return utils.default_process(text).split()
-
-
-def search_catalog(query: str, catalog: Sequence[CatalogItem], limit: int = MAX_SUGGESTIONS) -> list[CatalogItem]:
-    """Shop-style search, best tier first:
-        0  name starts with the query               "prim"        -> Primed ...
-        1  every query word starts a name word, in order   "arcane ener" -> Arcane Energize
-        2  every query word starts a name word, any order
-        3  query appears inside the name
-        4  only when nothing above matched: each word within a typo of a name word ("nekrso" -> Nekros)
-    Ties go to the shorter name ("Serration" before "Spectral Serration"), typos to the closer match.
-    WRatio alone ranked hundreds of names equally and fell back to alphabetical order.
-    """
-    q_words = [ALIASES.get(w, w) for w in _words(query)]
-    if not q_words or len(" ".join(q_words)) < 2:
-        return []
-    q = " ".join(q_words)
-    scored = []
-    for item in catalog:
-        name = " ".join(_words(item.name))
-        n_words = name.split()
-        if name.startswith(q):
-            tier = 0
-        elif _prefix_in_order(q_words, n_words):
-            tier = 1
-        elif all(any(w.startswith(qw) for w in n_words) for qw in q_words):
-            tier = 2
-        elif q in name:
-            tier = 3
-        else:
-            continue
-        scored.append((tier, 0.0, len(name), name, item))
-    if not scored:
-        # Typos only: match each typed word to its closest name word (or the start of one).
-        for item in catalog:
-            n_words = _words(item.name)
-            best = [max(max(fuzz.ratio(qw, w), fuzz.ratio(qw, w[:len(qw) + 1])) for w in n_words) for qw in q_words]
-            if min(best) >= TYPO_MIN:
-                name = " ".join(n_words)
-                scored.append((4, -round(sum(best) / len(best)), len(name), name, item))
-    scored.sort(key=lambda s: s[:4])
-    return [s[4] for s in scored[:limit]]
-
-
-def _prefix_in_order(q_words: list[str], n_words: list[str]) -> bool:
-    i = 0
-    for w in n_words:
-        if i < len(q_words) and w.startswith(q_words[i]):
-            i += 1
-    return i == len(q_words)
 
 
 def item_title(item: CatalogItem) -> str:
@@ -134,19 +52,15 @@ def item_title(item: CatalogItem) -> str:
     return f'{name} <span style="color:#8fa3c2; font-size:13px; font-weight:400">max rank {item.max_rank}</span>'
 
 
-class MarketWindow(QWidget):
+class MarketSection(Section):
+    PAGES = {"buy": "Buy", "sell": "Sell", "orders": "My orders", "trades": "Trades", "alerts": "Alerts"}
     _sellers_ready = pyqtSignal(int, list)
-    _async_done = pyqtSignal(object, object)  # (callback, result) run on the UI thread
     _sellers_failed = pyqtSignal(int, str)
     alerts_changed = pyqtSignal()
 
     def __init__(self, catalog: Sequence[CatalogItem], sellers: SellerService,
                  account: Optional[Account] = None) -> None:
         super().__init__()
-        self.setWindowTitle("VoidTrace market")
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
-        theme.follow(self, STYLE)
-        self.resize(640, 560)
         self.catalog = list(catalog)
         self.by_slug = {item.slug: item for item in self.catalog}
         self.by_id = {item.id: item for item in self.catalog if item.id}
@@ -155,7 +69,6 @@ class MarketWindow(QWidget):
         self.item: Optional[CatalogItem] = None
         self.rows: list[SellerOrder] = []
         self._request = 0
-        self._executor = ThreadPoolExecutor(max_workers=2)
 
         self.search = QLineEdit(placeholderText="Search an item, e.g. primed continuity")
         self.suggestions = QListWidget()
@@ -167,6 +80,7 @@ class MarketWindow(QWidget):
         # fixed width cut them to "Ran...(0)".
         self.rank.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.rank.view().setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.rank.hide()  # shown once a ranked item is open
         self.online = QCheckBox("Include online sellers")
         self.online.setChecked(True)
         self.alert_button = QPushButton("Alert me\u2026")
@@ -187,17 +101,8 @@ class MarketWindow(QWidget):
         for col in range(1, len(COLUMNS)):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         self.status = QLabel(objectName="muted")
-        self.toast = QLabel(objectName="toast")
-        self._toast_timer = QTimer(self, singleShot=True, interval=4000)
-        self._toast_timer.timeout.connect(lambda: self.toast.setText(""))
 
-        from .trade_panel import MyOrdersPanel, PostOrderPanel  # imported here: it imports this module's types
-
-        self.account_button = QPushButton(objectName="account")
-        self.account_button.clicked.connect(self._account_clicked)
-        search_row = QHBoxLayout()
-        search_row.addWidget(self.search, 1)
-        search_row.addWidget(self.account_button)
+        from .orders import MyOrdersPanel, PostOrderPanel  # imported here: it imports this module's types
 
         controls = QHBoxLayout()
         controls.addWidget(self.title, 1)
@@ -214,28 +119,24 @@ class MarketWindow(QWidget):
 
         self.post_panel = PostOrderPanel(self)
         self.orders_panel = MyOrdersPanel(self)
-        from .trade_history_panel import TradeHistoryPanel
+        from .trades import TradeHistoryPanel
 
         self.trades_panel = TradeHistoryPanel()
-        from .alerts_panel import AlertsPanel
+        from .alerts import AlertsPanel
 
         self.alerts_panel = AlertsPanel(on_changed=self.alerts_changed.emit)
-        self.tabs = QTabWidget()
-        self.tabs.addTab(buy_tab, "Buy from players")
-        self.tabs.addTab(self.post_panel, "Post order")
-        self.tabs.addTab(self.orders_panel, "My orders")
-        self.tabs.addTab(self.trades_panel, "Trades")
-        self.tabs.addTab(self.alerts_panel, "Alerts")
-        self.tabs.currentChanged.connect(self._tab_changed)
+        for key, page in (("buy", buy_tab), ("sell", self.post_panel), ("orders", self.orders_panel),
+                          ("trades", self.trades_panel), ("alerts", self.alerts_panel)):
+            self.add_page(key, page)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(search_row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.search)
         layout.addWidget(self.suggestions)
-        layout.addWidget(self.tabs, 1)
+        layout.addWidget(self.pages, 1)
         layout.addWidget(self.toast)
-        self._async_done.connect(lambda callback, result: callback(result))
-        self.account_changed()
-        from .trade_panel import guard_wheel
+        self.refresh_account()
+        from .widgets import guard_wheel
 
         self._wheel_guard = guard_wheel(self)  # scrolling over the rank picker changed the rank
 
@@ -285,9 +186,8 @@ class MarketWindow(QWidget):
         self.rank.setVisible(item.max_rank is not None)
         self.rank.blockSignals(False)
         self.post_panel.set_item(rank)
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        if self.current_page() not in ("buy", "sell"):
+            self.show_page("buy")  # the item is on Buy: from Trades or Alerts the pick looked lost
         self.refresh()
 
     def selected_rank(self) -> Optional[int]:
@@ -377,15 +277,14 @@ class MarketWindow(QWidget):
             self.add_alert(price)
 
     def add_alert(self, price: int) -> None:
-        from .alerts import Alert, add_alert
+        from ..alerts import Alert, add_alert
 
         rank = self.selected_rank()
         alert = Alert(self.item.slug, self.item.name, int(price), rank, self.item.max_rank is not None)
         add_alert(alert)
         self.alerts_panel.refresh()
         self.alerts_changed.emit()
-        self.toast.setText(f"Alert set: {alert.label} at {price}p or less. Checked every minute.")
-        self._toast_timer.start()
+        self.show_toast(f"Alert set: {alert.label} at {price}p or less. Checked every minute.")
 
     # --- clipboard ---------------------------------------------------------------------
 
@@ -396,56 +295,21 @@ class MarketWindow(QWidget):
         if not (0 <= row < len(self.rows)) or self.item is None:
             return
         QApplication.clipboard().setText(self.whisper_for(row))
-        self.toast.setText(f"Copied whisper to {self.rows[row].ingame_name}. Paste it in game chat.")
-        self._toast_timer.start()
+        self.show_toast(f"Copied whisper to {self.rows[row].ingame_name}. Paste it in game chat.")
 
-    # --- account + background work -----------------------------------------------------
+    # --- pages and account ---------------------------------------------------------------
 
-    def run_async(self, fn, on_ok, on_err=None) -> None:
-        """Run `fn` off the UI thread; call on_ok(result) or on_err(exception) back on the UI thread."""
-        def work():
-            try:
-                self._async_done.emit(on_ok, fn())
-            except Exception as exc:  # reported to the panel that asked, never crashes the UI
-                log.warning("market request failed: %s", exc)
-                if on_err is not None:
-                    self._async_done.emit(on_err, exc)
-
-        self._executor.submit(work)
-
-    def account_changed(self) -> None:
-        if self.account.signed_in:
-            self.account_button.setText(f"Signed in as {self.account.ingame_name or 'you'}  \u00b7  Sign out")
-        else:
-            self.account_button.setText("Sign in to Warframe.Market")
+    def refresh_account(self) -> None:
         self.post_panel.update_price()
-        if self.tabs.currentWidget() is self.orders_panel:
+        if self.current_page() == "orders":
             self.orders_panel.refresh()
 
-    def show_sign_in(self) -> None:
-        from .trade_panel import SignInDialog
-
-        SignInDialog(self).exec()
-
-    def _account_clicked(self) -> None:
-        if self.account.signed_in:
-            self.account.sign_out()
-            self.account_changed()
-        else:
-            self.show_sign_in()
-
-    def _tab_changed(self, index: int) -> None:
-        if self.tabs.widget(index) is self.orders_panel:
+    def page_shown(self, key: str) -> None:
+        if key == "orders":
             self.orders_panel.refresh()
-        elif self.tabs.widget(index) is self.trades_panel:
+        elif key == "trades":
             self.trades_panel.refresh()
-        elif self.tabs.widget(index) is self.alerts_panel:
+        elif key == "alerts":
             self.alerts_panel.refresh()
-
-    def closeEvent(self, event) -> None:  # noqa: N802
-        # Closing only hides it; the app keeps running in the tray.
-        event.ignore()
-        self.hide()
-
-    def shutdown(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        elif key == "buy":
+            self.search.setFocus()

@@ -1,4 +1,8 @@
-"""VoidTrace overlay app: log trigger -> capture -> OCR -> resolve -> price -> overlay.
+"""VoidTrace: starts everything and wires it together.
+
+The tray icon, the one VoidTrace window (Market, Rivens, Relics: voidtrace/ui/main_window.py), and the
+in-game helpers: reward-screen prices (log trigger -> capture -> OCR -> resolve -> price -> overlay),
+the riven popup, the trade card, price alerts and the online status.
 
     python main_app.py                     # watch the game's log, show prices on the reward screen
     python main_app.py --demo shot.png     # run the pipeline once on a screenshot and show it
@@ -22,15 +26,14 @@ from typing import Optional
 import cv2
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon
-from PyQt6.QtGui import QActionGroup, QColor
-from PyQt6.QtWidgets import QApplication, QColorDialog, QMenu, QMessageBox, QSystemTrayIcon
+from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from voidtrace.cv_cleaner import TesseractNotFound, capture_screen, warframe_is_foreground
 from voidtrace.debug_log import DebugChannelBusy, DebugLogSource, find_warframe_pid
 from voidtrace import app_support, disclaimer, hotkey, online_status, settings, theme, trade_toast
 from voidtrace.icons import voidtrace_logo
 from voidtrace.items import load_catalog, load_items
-from voidtrace.market_window import MarketWindow
+from voidtrace.ui.market import MarketSection
 from voidtrace.rivens import RivenService, load_riven_catalog
 from voidtrace.sellers import SellerService
 from voidtrace.log_watcher import LogTailer, LogWatcher, RewardScreenEvent, default_log_path
@@ -143,66 +146,36 @@ def app_icon() -> QIcon:
     return icon
 
 
-def make_tray(app: QApplication, open_market, game_log_status=lambda: None, open_rivens=None,
-              toggle_riven_popup=None, toggle_trade_updates=None, open_relics=None,
-              toggle_online_status=None) -> QSystemTrayIcon:
+def make_tray(app: QApplication, open_window, game_log_status=lambda: None, toggle_riven_popup=None,
+              toggle_trade_updates=None, toggle_online_status=None) -> QSystemTrayIcon:
+    """The tray icon: click it to open VoidTrace; right-click for the toggles and the rest."""
+    from voidtrace.ui.main_window import accent_menu
+
     tray = QSystemTrayIcon(app_icon(), app)
     tray.setToolTip("VoidTrace")
     menu = QMenu()
-    menu.addAction("Open market (Ctrl+Shift+M)", open_market)
-    if open_rivens is not None:
-        menu.addAction("Rivens (Ctrl+Shift+R)", open_rivens)
-    if open_relics is not None:
-        menu.addAction("Relics (which to open)", open_relics)
-    if toggle_riven_popup is not None:
-        popup_action = menu.addAction("Riven popup in Cycle / Item Details")
-        popup_action.setCheckable(True)
-        popup_action.setChecked(True)
-        popup_action.toggled.connect(toggle_riven_popup)
-    if toggle_trade_updates is not None:
-        trades_action = menu.addAction("Update orders after trades")
-        trades_action.setCheckable(True)
-        trades_action.setChecked(trade_toast.enabled())
-        trades_action.toggled.connect(toggle_trade_updates)
-    if toggle_online_status is not None:
-        status_action = menu.addAction("Show me in game on Warframe.Market while playing")
-        status_action.setCheckable(True)
-        status_action.setChecked(online_status.enabled())
-        status_action.toggled.connect(toggle_online_status)
-    add_accent_menu(menu)
+    menu.addAction("Open VoidTrace", open_window)
+    menu.addSeparator()
+    for label, toggle, on in (("Riven popup in Cycle / Item Details", toggle_riven_popup, True),
+                              ("Update orders after trades", toggle_trade_updates, trade_toast.enabled()),
+                              ("Show me in game on Warframe.Market while playing", toggle_online_status,
+                               online_status.enabled())):
+        if toggle is not None:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(on)
+            action.toggled.connect(toggle)
+    menu.addMenu(accent_menu(menu))
+    menu.addSeparator()
     menu.addAction("Run self-test", lambda: show_self_test(game_log_status()))
     menu.addAction("Open log folder", lambda: _open_folder(app_support.log_path().parent))
     menu.addAction("Disclaimer (use at your own risk)", lambda: show_disclaimer(first_run=False))
     menu.addSeparator()
     menu.addAction("Quit VoidTrace", app.quit)
-    tray.activated.connect(lambda reason: open_market() if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
+    tray.activated.connect(lambda reason: open_window() if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
     tray.setContextMenu(menu)
     tray.show()
     return tray
-
-
-def add_accent_menu(menu: QMenu) -> QMenu:
-    """Tray > Accent colour: presets, or any colour; remembered, and every window follows at once."""
-    sub = menu.addMenu("Accent colour")
-    group = QActionGroup(sub)
-    current = theme.accent_hex().lower()
-    for name, color in theme.PRESETS.items():
-        action = sub.addAction(name)
-        action.setCheckable(True)
-        action.setChecked(color.lower() == current)
-        action.setActionGroup(group)
-        action.triggered.connect(lambda _=False, c=color: theme.set_accent(c))
-    sub.addSeparator()
-
-    def pick() -> None:
-        chosen = QColorDialog.getColor(theme.accent(), None, "VoidTrace accent colour")
-        if chosen.isValid():
-            for action in group.actions():
-                action.setChecked(False)
-            theme.set_accent(chosen.name())
-
-    sub.addAction("Custom…", pick)
-    return sub
 
 
 def show_disclaimer(first_run: bool) -> bool:
@@ -257,7 +230,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--source", choices=["auto", "debug", "file"], default="auto",
                         help="log source: live debug output (real time) or the EE.log file")
     parser.add_argument("--riven-shot", type=Path, default=None,
-                        help="open the riven window and read the riven on this screenshot")
+                        help="open Rivens > Price check and read the riven on this screenshot")
     parser.add_argument("--any-window", action="store_true",
                         help="capture even when Warframe is not the active window (testing)")
     parser.add_argument("--hide-after", type=float, default=20.0,
@@ -283,7 +256,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if instance_lock is None:
         QMessageBox.information(None, "VoidTrace", "VoidTrace is already running.\n\n"
                                 "Look for the blue crystal icon in the system tray (bottom right, near the clock). "
-                                "Ctrl+Shift+M opens the market.")
+                                "Click the tray icon to open it.")
         return 0
     signal.signal(signal.SIGINT, lambda *_: app.quit())
     # Let Python handle Ctrl+C while Qt's loop runs.
@@ -306,15 +279,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     controller = Controller(pipeline, overlay, int(args.delay * 1000))
 
-    market = MarketWindow(load_catalog(), SellerService())
+    from voidtrace.ui.main_window import MainWindow
+    from voidtrace.ui.relics import RelicSection
+    from voidtrace.ui.rivens import RivenSection
 
-    def open_market() -> None:
-        market.show()
-        market.raise_()
-        market.activateWindow()
-        market.search.setFocus()
-
-    rivens = None
+    market = MarketSection(load_catalog(), SellerService())
     riven_data_cache: dict = {}
     riven_data_lock = threading.Lock()
 
@@ -326,53 +295,24 @@ def main(argv: Optional[list[str]] = None) -> int:
                 riven_data_cache["service"] = RivenService(market.sellers.client)
             return riven_data_cache["catalog"], riven_data_cache["service"]
 
-    def open_rivens() -> None:
-        nonlocal rivens
-        if rivens is None:
-            from voidtrace.riven_window import RivenWindow
-
-            try:
-                rivens = RivenWindow(*riven_data(), account=market.account)
-            except Exception as exc:
-                log.warning("could not load riven data: %s", exc)
-                QMessageBox.warning(None, "VoidTrace", f"Could not load riven data from Warframe.Market:\n{exc}")
-                return
-        rivens.show()
-        rivens.raise_()
-        rivens.activateWindow()
-        rivens.search.setFocus()
-
-    relics_window = None
-
-    def open_relics() -> None:
-        nonlocal relics_window
-        if relics_window is None:
-            from voidtrace.relic_window import RelicWindow
-
-            relics_window = RelicWindow(reward_items, pipeline.prices)
-        relics_window.show()
-        relics_window.raise_()
-        relics_window.activateWindow()
-        relics_window.search.setFocus()
+    window = MainWindow(market, RelicSection(reward_items, pipeline.prices), riven_data,
+                        lambda data: RivenSection(*data, account=market.account))
 
     def riven_hotkey() -> None:
-        """Ctrl+Shift+R: in game, read the riven on screen (Item Details view); else just open the window."""
+        """Ctrl+Shift+R: in game, read the riven on screen (Item Details view); else just open Rivens."""
         frame = None
         if args.any_window or warframe_is_foreground():
             try:
                 frame = capture_screen(args.monitor)  # before the window opens on top of the card
             except Exception as exc:
                 log.warning("riven capture failed: %s", exc)
-        open_rivens()
-        if frame is not None and rivens is not None:
-            rivens.read_from_frame(frame)
+        if frame is None:
+            window.open_page("rivens/price")
+        else:
+            window.read_riven(frame)
 
     def open_riven_details(draft, _check) -> None:
-        """The popup was clicked: the full riven window on that riven, price check included."""
-        open_rivens()
-        if rivens is not None and draft is not None:
-            rivens.load_draft(draft)
-            rivens.price_panel.run_check()
+        window.open_riven_draft(draft)
 
     from voidtrace.riven_popup import RivenAssistant, RivenPopup
     from voidtrace.riven_watch import RivenScreenWatcher
@@ -398,13 +338,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     def open_card(slot: int) -> None:
         item = overlay.cards[slot].resolution.item
         if item is not None and item.slug is not None:
-            market.open_item(item.slug)
+            window.open_item(item.slug)
 
     overlay.card_clicked.connect(open_card)
     watcher = None
 
     def refresh_my_orders() -> None:
-        if market.isVisible():
+        if window.isVisible() and window.current_page() == "market/orders":
             market.orders_panel.refresh()
 
     trades = trade_toast.TradeTracker(market.account, market.catalog, trade_toast.TradeToast(screen.geometry()),
@@ -432,13 +372,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         return ("FAIL: using the slower log file: another program (WFInfo, Overwolf, DebugView) "
                 "was reading the game's log when VoidTrace started")
 
-    tray = make_tray(app, open_market, game_log_status, open_rivens, toggle_riven_popup, toggle_trade_updates,
-                     open_relics, toggle_online_status)
+    tray = make_tray(app, window.open_page, game_log_status, toggle_riven_popup, toggle_trade_updates, toggle_online_status)
     status_keeper.changed.connect(lambda text: tray.setToolTip(f"VoidTrace\n{text}"))
     status_keeper.start()
     riven_watcher.start()
     tray.showMessage("VoidTrace is running",
-                     "Prices appear on relic reward screens (Borderless Fullscreen). Ctrl+Shift+M opens the market.",
+                     "Prices appear on relic reward screens (Borderless Fullscreen). Click this icon to open VoidTrace.",
                      app_icon(), 7000)
     from voidtrace.alerts import AlertWatcher
     from voidtrace.sellers import whisper_text
@@ -461,7 +400,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     alert_watcher.found.connect(alert_found)
     tray.messageClicked.connect(tray_message_clicked)
     alert_watcher.start()
-    hotkey_filter = None if args.no_hotkey else hotkey.register(app, open_market)  # noqa: F841
+    hotkey_filter = None if args.no_hotkey else hotkey.register(app, lambda: window.open_page("market/buy"))  # noqa: F841
     riven_hotkey = None if args.no_hotkey else hotkey.register(  # noqa: F841
         app, riven_hotkey, key="R", hotkey_id=hotkey.RIVEN_HOTKEY_ID)
 
@@ -470,9 +409,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if shot is None:
             print(f"could not read image: {args.riven_shot}", file=sys.stderr)
             return 1
-        open_rivens()
-        if rivens is not None:
-            rivens.read_from_frame(shot)
+        window.read_riven(shot)
 
     if args.demo is not None:
         frame = cv2.imread(str(args.demo))
@@ -495,16 +432,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         if watcher is not None:
             watcher.stop()
         controller.shutdown()
-        market.shutdown()
+        window.shutdown()
         riven_watcher.stop()
         riven_assistant.shutdown()
         trades.shutdown()
         alert_watcher.shutdown()
         status_keeper.stop()
-        if relics_window is not None:
-            relics_window.shutdown()
-        if rivens is not None:
-            rivens.shutdown()
         hotkey.unregister()
         hotkey.unregister(hotkey.RIVEN_HOTKEY_ID)
 
