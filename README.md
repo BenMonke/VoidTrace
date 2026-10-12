@@ -87,7 +87,7 @@ python tools/debug_log_probe.py --seconds 120   # measure EE.log delay vs live d
 - **Ctrl+Shift+M** (or the tray icon) opens the market window for any item, mods included. Type to search;
   ranked items get a rank picker.
 - **Click a seller** to copy warframe.market's whisper, then paste it in game chat:
-  `/w Seller Hi! I want to buy: "Primed Continuity (rank 10)" for 45 platinum. (warframe.market)`
+  `/w Seller Hi! I want to buy: "Primed Continuity (rank 10)" for 45 platinum. (warframe.market through VoidTrace)`
 - Sellers in game come first, cheapest first. Prices the IQR filter flags as outliers stay listed, greyed out.
 - Platinum and ducat icons are drawn by VoidTrace (`voidtrace/icons.py`), not taken from the game.
 
@@ -111,6 +111,15 @@ as the website (`POST /v1/auth/signin`), and orders go to the v2 order endpoints
 token. The password is sent only to api.warframe.market and never stored; the token is kept in
 Windows Credential Manager (`keyring`) and removed by **Sign out**. Nothing is posted automatically;
 the only automatic change is lowering an order after a trade (above).
+
+## Online status (optional)
+
+Tray > **Show me in game on Warframe.Market while playing** (off by default). While you are signed
+in, VoidTrace sets your Warframe.Market status to *In game* when Warframe starts and puts back what
+you had (Online or Invisible) when it closes or when VoidTrace quits, so buyers only see you while you
+can trade. It uses Warframe.Market's websocket (`@wfm|cmd/status/set`), opening a short connection for
+each change. *In game* is set for one hour at a time and renewed every 30 minutes, so if VoidTrace
+crashes or the PC sleeps the status falls back by itself.
 
 ## Relic planner
 
