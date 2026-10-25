@@ -24,7 +24,7 @@ from .. import online_status, settings, svg_icons
 from .. import theme as T
 from .market import MarketSection
 from .relics import RelicSection
-from .widgets import BUTTON_STYLE, STYLE, Section
+from .widgets import BUTTON_STYLE, STYLE, Notice, Section, Skeleton, make_table
 
 log = logging.getLogger(__name__)
 
@@ -147,6 +147,40 @@ class AvatarButton(QToolButton):
         p.drawEllipse(QRectF(30, 30, 10, 10))
 
 
+class RivenPlaceholder(QWidget):
+    """Rivens before its data has downloaded: the page's skeleton, or what went wrong and Retry."""
+
+    def __init__(self, retry: Callable[[], None]) -> None:
+        super().__init__()
+        self._text = ""
+        self.search = Skeleton(T.SEARCH_MAX_WIDTH, T.CONTROL_HEIGHT)
+        self.table = make_table(["Riven", "Buffs", "Curse", "MR", "Rank", "Rolls", "Grade", "Price", "Seller"])
+        self.notice = Notice()
+        self.retry = QPushButton("Retry")
+        self.retry.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.retry.clicked.connect(retry)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, T.SPACE_4, 0, 0)
+        layout.setSpacing(T.SPACE_3)
+        layout.addWidget(self.search)
+        layout.addWidget(self.notice)
+        layout.addWidget(self.retry, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.table, 1)
+
+    def text(self) -> str:
+        return self._text
+
+    def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
+        self._text = text
+        failed = not text.startswith("Loading")
+        self.notice.show_text(text if failed else "", "error")
+        self.retry.setVisible(failed)
+        self.search.setVisible(not failed)
+        self.table.setVisible(not failed)
+        if not failed:
+            self.table.state.loading()
+
+
 class MainWindow(QWidget):
     _rivens_loaded = pyqtSignal(object)
     _rivens_failed = pyqtSignal(str)
@@ -243,14 +277,20 @@ class MainWindow(QWidget):
             self._tab_row[section] = row
         self.toast_slot = QHBoxLayout()
         self.toast_slot.setContentsMargins(0, 0, 0, 0)
+        self.actions_slot = QHBoxLayout()  # the page's filters and actions, right-aligned
+        self.actions_slot.setContentsMargins(0, 0, 0, 0)
+        self.status_slot = QVBoxLayout()  # the page's status line, under the header
+        self.status_slot.setContentsMargins(0, T.SPACE_1, 0, 0)
+        self._docked: list[QWidget] = []
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(T.SPACE_4)
         header.addWidget(self.section_title)
         header.addWidget(self.tab_rows, 1)
         header.addLayout(self.toast_slot)
+        header.addLayout(self.actions_slot)
 
-        self.riven_placeholder = QLabel(objectName="muted", alignment=Qt.AlignmentFlag.AlignCenter, wordWrap=True)
+        self.riven_placeholder = RivenPlaceholder(lambda: self.show_page(self._current))
         self.stack = QStackedWidget()
         for widget in (market, relics, self.riven_placeholder):
             self.stack.addWidget(widget)
@@ -261,6 +301,7 @@ class MainWindow(QWidget):
         content.setContentsMargins(T.SPACE_6, T.SPACE_8, T.SPACE_6, T.SPACE_6)
         content.setSpacing(0)
         content.addLayout(header)
+        content.addLayout(self.status_slot)
         content.addWidget(self.stack, 1)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -340,12 +381,14 @@ class MainWindow(QWidget):
         if name == "rivens" and self._rivens is None:
             self._riven_page = page
             self.stack.setCurrentWidget(self.riven_placeholder)
+            self._dock_header(self.riven_placeholder)
             self._load_rivens()
             return
         section = self.section(name)
         self.stack.setCurrentWidget(section)
         self._dock_toast(section)
         section.show_page(page)
+        self._dock_header(section.page(page))
 
     def _select(self, key: str) -> None:
         section, page = key.split("/")
@@ -365,6 +408,21 @@ class MainWindow(QWidget):
             widget = self.toast_slot.itemAt(i).widget()
             widget.setVisible(widget is section.toast)
 
+    def _dock_header(self, page: QWidget) -> None:
+        """The page's `header_actions` widget goes on the header line, its `status_line` under it."""
+        parts = [(getattr(page, "header_actions", None), self.actions_slot),
+                 (getattr(page, "status_line", None), self.status_slot)]
+        wanted = [w for w, _slot in parts if w is not None]
+        for widget in self._docked:
+            if widget not in wanted:
+                widget.hide()
+        for widget, slot in parts:
+            if widget is not None:
+                if widget not in self._docked:
+                    slot.addWidget(widget)
+                    self._docked.append(widget)
+                widget.show()
+
     def _watch(self, section: Section) -> None:
         name = next(n for n in ("market", "relics", "rivens") if self.section(n) is section)
         section.account_switched.connect(self.account_changed)
@@ -376,6 +434,7 @@ class MainWindow(QWidget):
             self._current = key
             settings.put("last_page", key)
             self._select(key)
+            self._dock_header(self.section(key.split("/")[0]).page(key.split("/")[1]))
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt naming)
         """Arrow keys: Left/Right move between page tabs, Up/Down between rail sections."""
@@ -443,8 +502,7 @@ class MainWindow(QWidget):
     def _on_rivens_failed(self, message: str) -> None:
         self._rivens_loading = False
         self._riven_waiting.clear()
-        self.riven_placeholder.setText(f"Could not load riven data from Warframe.Market: {message}\n\n"
-                                       "Open a Rivens page again to retry.")
+        self.riven_placeholder.setText(f"Could not load riven data from Warframe.Market: {message}")
 
     def _open_discord(self, notifier) -> None:
         from .discord import DiscordDialog

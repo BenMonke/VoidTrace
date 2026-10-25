@@ -9,17 +9,16 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Callable, Optional
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QIcon
-from PyQt6.QtWidgets import QHBoxLayout, QHeaderView, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QHeaderView, QLabel, QVBoxLayout, QWidget
 
 from .. import theme
 from ..icons import platinum_icon
-from .widgets import BUTTON_STYLE, make_cell, make_table, set_rows
+from .widgets import BUTTON_STYLE, StatTile, header_bar, make_cell, make_table, refresh_button, set_rows
 from ..trades import PLATINUM, TradeHistory, TradeItem, TradeRecord, totals
 
-GREEN = QColor("#5ccf8f")
-RED = QColor("#f08a6e")
+GREEN = QColor(theme.POSITIVE)
+RED = QColor(theme.NEGATIVE)
 
 
 def items_text(items: tuple[TradeItem, ...]) -> str:
@@ -32,10 +31,10 @@ def items_text(items: tuple[TradeItem, ...]) -> str:
     return ", ".join(parts) or "—"
 
 
-def totals_text(label: str, records: list[TradeRecord], since: Optional[datetime]) -> str:
+def show_totals(tile: StatTile, records: list[TradeRecord], since: Optional[datetime]) -> None:
     t = totals(records, since)
-    sign = "+" if t.net > 0 else ""
-    return f"{label}: {sign}{t.net}p net ({t.earned} in, {t.spent} out, {t.count} trades)"
+    color = theme.POSITIVE if t.net > 0 else theme.NEGATIVE if t.net < 0 else theme.TEXT_PRIMARY
+    tile.set(f"{'+' if t.net > 0 else ''}{t.net}p", f"{t.earned} in · {t.spent} out · {t.count} trades", color)
 
 
 class TradeHistoryPanel(QWidget):
@@ -53,23 +52,22 @@ class TradeHistoryPanel(QWidget):
         self.table = make_table(self.COLUMNS)
         self.table.horizontalHeader().setSectionResizeMode(self.ITEMS, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeaderItem(self.PLAT).setIcon(QIcon(platinum_icon(14)))
-        self.today = QLabel()
-        self.week = QLabel(objectName="muted")
-        self.all_time = QLabel(objectName="muted")
-        self.reload = QPushButton("Refresh")
-        self.reload.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.today = StatTile("Today")
+        self.week = StatTile("Last 7 days")
+        self.all_time = StatTile("All time")
+        self.reload = refresh_button()
         self.reload.clicked.connect(self.refresh)
-        top = QHBoxLayout()
-        sums = QVBoxLayout()
-        for label in (self.today, self.week, self.all_time):
-            sums.addWidget(label)
-        top.addLayout(sums, 1)
-        top.addWidget(self.reload, 0, Qt.AlignmentFlag.AlignTop)
+        self.header_actions = header_bar(self.reload)
+        tiles = QHBoxLayout()
+        tiles.setSpacing(theme.SPACE_4)
+        for tile in (self.today, self.week, self.all_time):
+            tiles.addWidget(tile, 1)
         layout = QVBoxLayout(self)
-        layout.addLayout(top)
+        layout.setSpacing(theme.SPACE_4)
+        layout.addLayout(tiles)
         layout.addWidget(self.table, 1)
         layout.addWidget(QLabel("Trades are read from the game log while VoidTrace runs, and kept on this PC only.",
-                                objectName="muted"))
+                                objectName="footnote"))
 
     def refresh(self) -> None:
         self.records = self.history.load()
@@ -87,16 +85,13 @@ class TradeHistoryPanel(QWidget):
     def _render(self) -> None:
         now = self.now()
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        self.today.setText(totals_text("Today", self.records, midnight))
-        self.week.setText(totals_text("Last 7 days", self.records, now - timedelta(days=7)))
-        self.all_time.setText(totals_text("All time", self.records, None))
+        show_totals(self.today, self.records, midnight)
+        show_totals(self.week, self.records, now - timedelta(days=7))
+        show_totals(self.all_time, self.records, None)
         rows = list(reversed(self.records))
-        self.table.clearSpans()
         if not rows:
-            set_rows(self.table, 1)
-            self.table.setSpan(0, 0, 1, len(self.COLUMNS))
-            self.table.setItem(0, 0, make_cell("No trades yet. They show up here after you trade in game.",
-                                               color=QColor(143, 163, 194)))
+            set_rows(self.table, 0)
+            self.table.state.message("No trades yet. They show up here after you trade in game.")
             return
         set_rows(self.table, len(rows))
         for row, r in enumerate(rows):

@@ -44,8 +44,9 @@ def test_panel_rows_newest_first_and_totals(qapp, history):
     assert t.item(1, panel.SIDE).text() == "Sold" and t.item(1, panel.PLAT).text() == "+10"
     assert t.item(0, panel.WHEN).text() == "10:00"
     assert t.item(2, panel.WHEN).text() == "01 Sep 10:00"
-    assert panel.today.text().startswith("Today: -15p net (10 in, 25 out, 2 trades)")
-    assert panel.all_time.text().startswith("All time: +15p net")
+    assert panel.today.value.text() == "-15p"
+    assert panel.today.detail.text() == "10 in · 25 out · 2 trades"
+    assert panel.all_time.value.text() == "+15p"
 
 
 def test_new_trade_shows_without_refresh(qapp, history):

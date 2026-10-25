@@ -10,7 +10,6 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -36,7 +35,8 @@ from ..rivens import (
     riven_grade,
     valid_names,
 )
-from .widgets import Stepper
+from .. import theme
+from .widgets import Stepper, card, form_rows, header_bar
 from .riven_find import MAX_BUFFS, refill_combo, stat_combo, auction_table, fill_auction_table, grade_color
 
 
@@ -55,9 +55,16 @@ class StatRow:
         self.box = stat_combo([], [("No curse" if curse else "—", None)])
         self.value = QDoubleSpinBox(minimum=-1000.0, maximum=1000.0, decimals=2)
         self.value.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
-        self.value.setMinimumWidth(80)
-        self.grade = QLabel()  # how well this stat rolled, e.g. "92%"
-        self.grade.setMinimumWidth(48)
+        self.value.setFixedWidth(104)
+        self.box.setMinimumWidth(240)
+        self.grade = QLabel()  # how well this stat rolled, e.g. "A-"
+        self.grade.setMinimumWidth(32)
+        self.line = QHBoxLayout()
+        self.line.setSpacing(theme.SPACE_2)
+        self.line.addWidget(self.box)
+        self.line.addWidget(self.value)
+        self.line.addWidget(self.grade)
+        self.line.addStretch(1)
 
     def attr(self) -> Optional[RivenAttr]:
         slug = self.box.currentData()
@@ -80,7 +87,8 @@ class PricePanel(QWidget):
         self.check: Optional[PriceCheck] = None
         self._request = 0
         self.shown_for, self.shown_disposition = "", None
-        self.name = QLineEdit(placeholderText="Riven name, e.g. Igni-insitron: the buffs fill in from it")
+        self.name = QLineEdit(placeholderText="e.g. Igni-insitron: the buffs fill in from it")
+        self.name.setFixedWidth(theme.FIELD_MAX_WIDTH)
         self.name_note = QLabel()
         self.name_note.setWordWrap(True)
         self.name_note.hide()
@@ -92,37 +100,41 @@ class PricePanel(QWidget):
         for p in POLARITIES:
             self.polarity.addItem(p.title(), p)
         self.check_button = QPushButton("Check price", objectName="primary")
+        self.check_button.setMinimumWidth(120)  # "Checking…" doesn't make it jump
         self.sell_button = QPushButton("Sell this riven…")
         self.sell_button.setEnabled(False)
-        self.result = QLabel(objectName="title")
+        self.header_actions = header_bar(self.sell_button)
+        self.result = QLabel(objectName="heading")
         self.result.setTextFormat(Qt.TextFormat.RichText)
         self.detail = QLabel(objectName="muted")
         self.detail.setWordWrap(True)
         self.table = auction_table()
+        self.table.state.message("Pick a weapon to price a riven", "search")
 
-        form = QGridLayout()
-        form.addWidget(QLabel("Name"), 0, 0)
-        form.addWidget(self.name, 0, 1, 1, 3)
-        form.addWidget(self.name_note, 1, 1, 1, 3)
-        for i, row in enumerate(self.rows):
-            form.addWidget(QLabel("Curse" if row.curse else f"Buff {i + 1}"), 2 + i, 0)
-            form.addWidget(row.box, 2 + i, 1, 1, 2)
-            form.addWidget(row.value, 2 + i, 3)
-            form.addWidget(row.grade, 2 + i, 4)
         extras = QHBoxLayout()
-        for label, widget in (("MR", self.mr), ("Rolls", self.rolls), ("Rank", self.rank), ("Polarity", self.polarity)):
-            extras.addWidget(QLabel(label))
+        extras.setSpacing(theme.SPACE_2)
+        for i, (label, widget) in enumerate((("MR", self.mr), ("Rolls", self.rolls), ("Rank", self.rank),
+                                             ("Polarity", self.polarity))):
+            if i:
+                extras.addSpacing(theme.SPACE_2)
+                extras.addWidget(QLabel(label, objectName="muted"))
             extras.addWidget(widget)
         extras.addStretch(1)
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.check_button)
-        buttons.addWidget(self.sell_button)
-        buttons.addStretch(1)
+        name = QVBoxLayout()
+        name.setSpacing(theme.SPACE_1)
+        name.addWidget(self.name)
+        name.addWidget(self.name_note)
+        self.form_card, form = card()
+        form.addLayout(form_rows([("Name", name)]
+                                 + [("Curse" if row.curse else f"Buff {i + 1}", row.line) for i, row in enumerate(self.rows)]
+                                 + [("MR", extras)]))
+        form.addSpacing(theme.SPACE_2)
+        form.addWidget(self.check_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.form_card.setMaximumWidth(720)
+        self.form_card.setEnabled(False)  # until a weapon is picked
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 0)
-        layout.addLayout(form)
-        layout.addLayout(extras)
-        layout.addLayout(buttons)
+        layout.setSpacing(theme.SPACE_3)
+        layout.addWidget(self.form_card)
         layout.addWidget(self.result)
         layout.addWidget(self.detail)
         layout.addWidget(self.table, 1)
@@ -156,7 +168,7 @@ class PricePanel(QWidget):
             elif not 0.85 <= roll <= 1.15:
                 row.grade.setText("?")  # outside what this riven can roll: a typo, or the wrong rank
                 row.grade.setToolTip("This value is outside the range this stat can roll at this rank.")
-                row.grade.setStyleSheet("color: #e6b450;")
+                row.grade.setStyleSheet(f"color: {theme.WARNING};")
             else:
                 g = grade(roll)
                 if row.curse:
@@ -170,7 +182,7 @@ class PricePanel(QWidget):
     # --- the name and the buffs must agree -------------------------------------------------
 
     def _note(self, text: str, warn: bool = False) -> None:
-        self.name_note.setStyleSheet("color: #e6b450;" if warn else "color: #8fa3c2;")
+        self.name_note.setStyleSheet(f"color: {theme.WARNING if warn else theme.TEXT_SECONDARY}; font-size: 12px;")
         self.name_note.setText(text)
         self.name_note.setVisible(bool(text))
 
@@ -219,9 +231,11 @@ class PricePanel(QWidget):
             refill_combo(row.box, allowed, [("No curse" if row.curse else "—", None)])
         self.check = None
         self._note("")
+        self.form_card.setEnabled(True)
         self.result.setText("")
         self.detail.setText("Type the riven's name to fill in its buffs, then Check price.")
         self.table.setRowCount(0)
+        self.table.state.message("Check price to see similar rivens", "search")
         self.sell_button.setEnabled(False)
 
     def draft(self) -> RivenDraft:
@@ -261,6 +275,9 @@ class PricePanel(QWidget):
         catalog = self.window_.catalog
         self.result.setText("")
         self.detail.setText("Checking listings…")
+        self.check_button.setText("Checking…")
+        self.check_button.setEnabled(False)
+        self.table.state.loading()
 
         def work() -> PriceCheck:
             auctions = self.window_.service.search(weapon.slug)
@@ -272,21 +289,30 @@ class PricePanel(QWidget):
 
     def _failed(self, request: int, exc: Exception) -> None:
         if request == self._request:
+            self._checked()
             self.detail.setText(f"Could not load listings: {exc}")
+            self.table.state.error(retry=self.run_check)
+
+    def _checked(self) -> None:
+        self.check_button.setText("Check price")
+        self.check_button.setEnabled(True)
 
     def _show(self, request: int, check: PriceCheck) -> None:
         if request != self._request:
             return
         self.check = check
+        self._checked()
         fill_auction_table(self.table, self.window_.catalog, list(check.comparables))
         self.sell_button.setEnabled(True)
+        if not check.comparables:
+            self.table.state.message("No similar rivens listed right now.")
         if check.estimate is None:
             self.result.setText("No listings to compare")
             self.detail.setText("Nobody is selling a riven for this weapon right now.")
             return
         mine = self.my_grade()
         self.result.setText(f"About {check.estimate:g} platinum" +
-                            (f'  <span style="color:#8fa3c2; font-size:13px; font-weight:400">your roll: {grade_from_percent(mine)}</span>'
+                            (f'  <span style="color:{theme.TEXT_SECONDARY}; font-size:13px; font-weight:400">your roll: {grade_from_percent(mine)}</span>'
                              if mine is not None else ""))
         extra = f" {len(check.outliers)} extreme price(s) left out." if check.outliers else ""
         if check.exact and check.tier not in ("same stats and curse", "same stats, no curse", "same positive stats"):

@@ -174,7 +174,7 @@ def test_popup_says_when_the_riven_could_not_be_read(qapp, catalog):
 def test_price_line(qapp):
     popup = RivenPopup(QRect(0, 0, 1920, 1080))
     popup.show_price(PriceCheck(20.0, 7, 150, 5, "2 of the same positive stats", ()))
-    assert popup.price.text == "~20" and "5 listings" in popup.price_detail.text()
+    assert popup.price.text == "~20" and popup.price_detail.text() == "7 to 150p · 5 similar listings"
 
 
 def test_reading_the_same_riven_again_changes_nothing_on_screen(qapp, catalog):

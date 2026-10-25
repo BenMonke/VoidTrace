@@ -230,6 +230,23 @@ def test_tracker_updates_orders_and_shows_undo(qapp, tmp_path):
     tracker.shutdown()
 
 
+def test_tracker_says_when_it_could_not_update_the_orders(qapp, tmp_path):
+    from voidtrace.trade_toast import TradeToast, TradeTracker
+
+    account = FakeAccount([])
+    account.my_orders = lambda: (_ for _ in ()).throw(ConnectionError("offline"))
+    toast = TradeToast(QRect(0, 0, 1920, 1080))
+    tracker = TradeTracker(account, CATALOG, toast, is_enabled=lambda: True, history=TradeHistory(tmp_path / "t.jsonl"))
+    tracker.executor.submit = lambda fn, *a: fn(*a)
+    for line in REAL_TRADE:
+        tracker.feed(line)
+    qapp.processEvents()
+    assert toast.isVisible() and toast.title.text() == "Couldn't update orders"
+    assert "offline" in toast.text.text() and not toast.undo_button.isVisible()
+    toast.hide()
+    tracker.shutdown()
+
+
 def test_tracker_does_nothing_when_turned_off_but_still_records(qapp, tmp_path):
     from voidtrace.trade_toast import TradeToast, TradeTracker
 

@@ -208,7 +208,7 @@ def test_clicking_a_seller_copies_the_whisper(qapp):
     window.open_item("primed_continuity")
     _wait(qapp, lambda: window.table.rowCount() == 2)
     assert sellers.asked[-1] == ("primed_continuity", None, True)  # any rank, like warframe.market
-    assert window.rank.isVisibleTo(window)
+    assert not window.rank.isHidden()  # shown in the header bar
     assert window.rank.itemText(0) == "Any rank (2)"
     assert window.rank.itemText(11) == "Rank 10 (2)"
     # Labels must fit: the box and its list grow instead of eliding to "Ran...(0)".
@@ -227,7 +227,7 @@ def test_unranked_item_hides_rank_controls(qapp):
     window = MarketSection(CATALOG, FakeSellers([SellerOrder("Kosmo", "ingame", 4, 1, None, 0, "")]))
     window.open_item("burston_prime_blueprint")
     _wait(qapp, lambda: window.table.rowCount() == 1)
-    assert not window.rank.isVisibleTo(window)
+    assert window.rank.isHidden()
     assert window.table.isColumnHidden(2)
     window.copy_row(0)
     assert QApplication.clipboard().text().endswith('"Burston Prime Blueprint" for 4 platinum. (warframe.market through VoidTrace)')
@@ -404,18 +404,22 @@ def test_my_orders_sorting(qapp):
     panel = window.orders_panel
     panel.refresh()
     _wait(qapp, lambda: panel.table.rowCount() == 4)
-    header = lambda col: panel.table.horizontalHeaderItem(col).text()  # noqa: E731
+    from PyQt6.QtCore import Qt
+
+    header = panel.table.horizontalHeader()
+    sorted_by = lambda: (header.sortIndicatorSection(), header.sortIndicatorOrder())  # noqa: E731
 
     # Default: visible orders first, then hidden.
     assert [o.visible for o in panel.shown] == [True, True, False, False]
-    assert header(panel.EYE).endswith("\u25b2")
+    assert sorted_by() == (panel.EYE, Qt.SortOrder.AscendingOrder)
 
     panel.sort_by(panel.PRICE)                   # first click: highest price first
     assert [o.platinum for o in panel.shown] == [30, 20, 12, 5]
-    assert header(panel.PRICE) == "Price \u25bc" and header(panel.EYE) == ""
+    assert sorted_by() == (panel.PRICE, Qt.SortOrder.DescendingOrder)
+    assert panel.table.horizontalHeaderItem(panel.PRICE).text() == "Price"
     panel.sort_by(panel.PRICE)                   # second click: lowest first
     assert [o.platinum for o in panel.shown] == [5, 12, 20, 30]
-    assert header(panel.PRICE) == "Price \u25b2"
+    assert sorted_by() == (panel.PRICE, Qt.SortOrder.AscendingOrder)
 
     panel.sort_by(panel.RANK)
     assert [o.rank for o in panel.shown] == [3, 2, 1, 0]

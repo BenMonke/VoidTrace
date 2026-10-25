@@ -141,6 +141,15 @@ def summarize(
     )
 
 
+FEW_SALES = 5  # a headline price from fewer trades (or listings) than this is shaky
+
+
+def few_sales(price: PriceStats) -> bool:
+    """The price rests on fewer than FEW_SALES trades, or listings when there were no trades."""
+    count = price.trade_volume if price.basis.startswith("trades") else price.n_orders
+    return count < FEW_SALES
+
+
 def price_basis_label(price: PriceStats) -> str:
     """Where the headline price came from, in a few words."""
     if price.basis == "trades_48h":

@@ -12,12 +12,13 @@ import logging
 from typing import Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QLabel, QLineEdit, QListWidget, QVBoxLayout
+from PyQt6.QtWidgets import QLabel, QListWidget, QVBoxLayout
 
 from ..account import Account
 from ..search import search_catalog
 from ..rivens import PriceCheck, RivenCatalog, RivenDraft, RivenService, RivenWeapon
-from .widgets import Section, guard_wheel
+from .. import theme
+from .widgets import Section, guard_wheel, search_field
 from .riven_find import FindPanel, weapon_title
 from .riven_price import PricePanel
 
@@ -34,12 +35,14 @@ class RivenSection(Section):
         self.account = account if account is not None else Account(service.client)
         self.weapon: Optional[RivenWeapon] = None
 
-        self.search = QLineEdit(placeholderText="Search a weapon, e.g. kulstar")
+        self.search = search_field("e.g. kulstar")
         self.suggestions = QListWidget()
         self.suggestions.setMaximumHeight(180)
+        self.suggestions.setMaximumWidth(theme.SEARCH_MAX_WIDTH)
         self.suggestions.hide()
-        self.title = QLabel("Pick a weapon to see its rivens.", objectName="title")
+        self.title = QLabel(objectName="heading")  # the weapon and its disposition, once picked
         self.title.setTextFormat(Qt.TextFormat.RichText)
+        self.title.hide()
 
         from .riven_trade import MyRivensPanel, SellPanel  # imported here: it imports this module's types
 
@@ -53,7 +56,8 @@ class RivenSection(Section):
         self.price_panel.sell_requested.connect(self.open_sell)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, theme.SPACE_4, 0, 0)
+        layout.setSpacing(theme.SPACE_1)
         layout.addWidget(self.search)
         layout.addWidget(self.suggestions)
         layout.addWidget(self.title)
@@ -88,6 +92,7 @@ class RivenSection(Section):
         self.suggestions.hide()
         self.search.setText(weapon.name)
         self.title.setText(weapon_title(weapon))
+        self.title.show()
         self.price_panel.set_weapon(weapon)
         self.find_panel.set_weapon(weapon)
 

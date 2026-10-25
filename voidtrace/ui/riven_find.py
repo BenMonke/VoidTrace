@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .. import theme
 from ..icons import platinum_icon
 from ..rivens import (
     RivenAuction,
@@ -33,7 +34,7 @@ from ..rivens import (
     riven_whisper,
 )
 from .widgets import make_cell, make_table, set_rows
-from .widgets import BUFF_COLOR, CURSE_COLOR, STATUS_COLOR
+from .widgets import BUFF_COLOR, CURSE_COLOR, MUTED, STATUS_COLOR
 
 
 if TYPE_CHECKING:
@@ -42,7 +43,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-CLEAN_COLOR = QColor(124, 201, 156)  # never-rolled rivens: worth calling out to buyers
+CLEAN_COLOR = QColor(theme.POSITIVE)  # never-rolled rivens: worth calling out to buyers
 
 
 # Rank matters: sellers list stat values at the riven's current rank (a rank-0 riven shows about a
@@ -66,7 +67,7 @@ def disposition_dots(disposition: float) -> str:
 
 
 def weapon_title(weapon: RivenWeapon) -> str:
-    return (f'{html.escape(weapon.name)} <span style="color:#8fa3c2; font-size:13px; font-weight:400">'
+    return (f'{html.escape(weapon.name)} <span style="color:{theme.TEXT_SECONDARY}; font-size:13px; font-weight:400">'
             f'{disposition_dots(weapon.disposition)} {weapon.disposition:.2f}</span>')
 
 
@@ -86,8 +87,10 @@ def grade_color(value: Optional[int]) -> Optional[QColor]:
     """Red (0) through amber to green (100), like the bars other riven tools draw."""
     if value is None:
         return None
-    t = value / 100
-    return QColor(int(240 - 116 * t), int(110 + 91 * t), int(90 + 66 * t))
+    t = max(0.0, min(1.0, value / 100))
+    if t < 0.5:
+        return theme.mix(QColor(theme.WARNING), QColor(theme.NEGATIVE), t * 2)
+    return theme.mix(QColor(theme.POSITIVE), QColor(theme.WARNING), (t - 0.5) * 2)
 
 
 def fill_auction_table(table: QTableWidget, catalog: RivenCatalog, auctions: list[RivenAuction]) -> None:
@@ -102,7 +105,7 @@ def fill_auction_table(table: QTableWidget, catalog: RivenCatalog, auctions: lis
         cells = [
             make_cell(catalog.riven_title(a)),
             make_cell(buffs, color=BUFF_COLOR),
-            make_cell(curse, color=CURSE_COLOR if a.negative else QColor(143, 163, 194)),
+            make_cell(curse, color=CURSE_COLOR if a.negative else MUTED),
             make_cell(str(a.mr), right=True),
             make_cell(str(a.rank), right=True),
             make_cell("clean" if a.rolls == 0 else str(a.rolls), right=True,
@@ -155,27 +158,27 @@ class FindPanel(QWidget):
         self.rolls.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.table = auction_table()
         self.table.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.status = QLabel(objectName="muted")
+        self.table.state.message("Pick a weapon to see its rivens", "search")
+        self.status = QLabel(objectName="status")
+        self.status_line = self.status
 
         filters = QHBoxLayout()
-        filters.addWidget(QLabel("Wanted:"))
+        filters.setSpacing(theme.SPACE_2)
+        filters.addWidget(QLabel("Wanted", objectName="muted"))
         for box in self.buffs:
             filters.addWidget(box)
-        filters.addWidget(QLabel("Curse:"))
+        filters.addSpacing(theme.SPACE_2)
+        filters.addWidget(QLabel("Curse", objectName="muted"))
         filters.addWidget(self.curse)
+        filters.addWidget(self.rolls)
+        filters.addSpacing(theme.SPACE_2)
+        filters.addWidget(self.buyout_only)
+        filters.addWidget(self.offline)
         filters.addStretch(1)
-        toggles = QHBoxLayout()
-        toggles.addWidget(self.buyout_only)
-        toggles.addWidget(self.offline)
-        toggles.addWidget(self.rolls)
-        toggles.addStretch(1)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(theme.SPACE_3)
         layout.addLayout(filters)
-        layout.addLayout(toggles)
-        layout.addWidget(QLabel("Click a riven to copy the whisper, then paste it in game chat.", objectName="muted"))
         layout.addWidget(self.table, 1)
-        layout.addWidget(self.status)
 
         for box in (*self.buffs, self.curse):
             box.currentIndexChanged.connect(lambda _: self.refresh())
@@ -209,6 +212,7 @@ class FindPanel(QWidget):
         wanted, curse, buyout = self.wanted(), self.curse.currentData(), self.buyout_only.isChecked()
         rolls = self.rolls.currentData()
         self.status.setText("Loading rivens…")
+        self.table.state.loading()
         self.window_.run_async(
             lambda: self.window_.service.search(weapon.slug, wanted, curse, buyout, statuses, rolls=rolls),
             lambda rows: self._show(request, rows),
@@ -217,6 +221,7 @@ class FindPanel(QWidget):
     def _failed(self, request: int, exc: Exception) -> None:
         if request == self._request:
             self.status.setText(f"Could not load rivens: {exc}")
+            self.table.state.error(retry=self.refresh)
 
     def _show(self, request: int, rows: list[RivenAuction]) -> None:
         if request != self._request:
@@ -227,6 +232,7 @@ class FindPanel(QWidget):
             self.status.setText(f"{len(rows)} rivens, sellers in game first, then cheapest.")
         else:
             self.status.setText("No rivens listed with these stats right now.")
+            self.table.state.message("No rivens match. Loosen a filter.")
 
     def whisper_for(self, row: int) -> str:
         a = self.auctions[row]

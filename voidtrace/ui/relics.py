@@ -16,17 +16,19 @@ from typing import Callable, Optional, Sequence
 
 from PyQt6.QtCore import QObject, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon
-from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QHeaderView, QLabel, QListWidget, QPushButton, QVBoxLayout, QWidget
 
 from ..icons import chest_icon, ducat_icon, platinum_icon
 from ..items import Item
 from ..price_cleaner import PriceService
 from ..relics import ERAS, REFINEMENTS, Relic, Reward, chance, load_relics, relic_value, search_relics
-from .widgets import Section, make_cell, make_table, set_rows
+from .. import theme
+from .widgets import Section, header_bar, make_cell, make_table, search_field, set_rows, show_sort, skeleton_cell
 
 log = logging.getLogger(__name__)
 
-RARITY_COLOR = {"common": QColor("#c49a6c"), "uncommon": QColor("#c0c8d4"), "rare": QColor("#e0b64f")}
+RARITY_COLOR = {"common": QColor(theme.RARITY_COMMON), "uncommon": QColor(theme.RARITY_UNCOMMON),
+                "rare": QColor(theme.RARITY_RARE)}
 
 
 def fmt(value: float, missing: int = 0) -> str:
@@ -100,6 +102,14 @@ class RelicPrices(QObject):
         except Exception:
             return {}
 
+    def loading(self) -> bool:
+        return bool(self.pending)
+
+    def retry(self, relics: Sequence[Relic]) -> None:
+        """Fetch again the prices that failed (no price, not even a cached one)."""
+        self.requested -= {slug for slug in self.requested if self.plat.get(slug) is None and slug not in self.pending}
+        self.load(relics)
+
     def progress(self) -> tuple[int, int]:
         """(prices fetched, prices asked for)."""
         return len(self.requested) - len(self.pending), len(self.requested)
@@ -155,12 +165,18 @@ class RelicTablePage(QWidget):
         for col in (self.INTACT_DUCATS, self.RADIANT_DUCATS):
             self.table.horizontalHeaderItem(col).setIcon(QIcon(ducat_icon(14)))
         self.table.cellDoubleClicked.connect(lambda row, _c: self.open_relic.emit(self.table.item(row, self.NAME).text()))
-        self.status = QLabel(objectName="muted")
-        self.bar = QHBoxLayout()  # RelicSection puts the Solo / Squad picker here
-        self.bar.addWidget(self.status, 1)
+        self.status = QLabel(objectName="status")
+        self.retry = QPushButton("Retry", objectName="ghost")
+        self.retry.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.retry.clicked.connect(lambda: (self.data.retry(self.relics), self.render()))
+        self.retry.hide()
+        self.status_line = QWidget()
+        line = QHBoxLayout(self.status_line)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.addWidget(self.status)
+        line.addWidget(self.retry)
+        line.addStretch(1)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(self.bar)
         layout.addWidget(self.table, 1)
         self._update_header()
 
@@ -181,10 +197,7 @@ class RelicTablePage(QWidget):
         self._fill()
 
     def _update_header(self) -> None:
-        for col, text in enumerate(self.COLUMNS):
-            arrow = (" \u25bc" if self.sort_desc else " \u25b2") if col == self.sort_col and text else ""
-            self.table.horizontalHeaderItem(col).setText(text + arrow)
-            self.table.horizontalHeaderItem(col).setToolTip("Click to sort")
+        show_sort(self.table, self.sort_col, self.sort_desc)
 
     def _row(self, relic: Relic) -> dict:
         squad = self.squad()
@@ -197,7 +210,7 @@ class RelicTablePage(QWidget):
             values[col] = (value, missing)
         priced = [(self.data.plat_of(r), r.name) for r in relic.rewards]
         known = [(p, n) for p, n in priced if p is not None]
-        best = max(known)[1] if known and len(known) == len(priced) else "\u2026"
+        best = max(known)[1] if known and len(known) == len(priced) else "\u2026"  # \u2026: still loading
         return {"relic": relic, "values": values, "best": best}
 
     def sort_value(self, row: dict, column: int):
@@ -225,6 +238,7 @@ class RelicTablePage(QWidget):
         unknown.sort(key=lambda r: r["relic"].name)
         chest = QIcon(chest_icon(32, self.vaulted))
         tip = "Vaulted: no longer drops" if self.vaulted else "Drops now"
+        loading = self.data.loading()
         self.table.setUpdatesEnabled(False)  # one repaint for the whole table, not one per cell
         set_rows(self.table, len(self.rows))
         for i, row in enumerate(known + unknown):
@@ -237,16 +251,26 @@ class RelicTablePage(QWidget):
             self.table.setItem(i, self.ERA, make_cell(relic.era))
             for col in (self.INTACT, self.RADIANT, self.INTACT_DUCATS, self.RADIANT_DUCATS):
                 value, missing = row["values"][col]
-                self.table.setItem(i, col, make_cell(fmt(value, missing), right=True))
-            self.table.setItem(i, self.BEST, make_cell(row["best"]))
+                cell = make_cell(fmt(value, missing), right=True)
+                if missing and loading:  # still loading: a pulsing bar, never a misleading 0.0*
+                    cell = skeleton_cell()
+                    cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.table.setItem(i, col, cell)
+            best = row["best"]
+            self.table.setItem(i, self.BEST, skeleton_cell(120) if best == "\u2026" and loading else make_cell(best))
         self.table.setUpdatesEnabled(True)
         done, asked = self.data.progress()
         missing = any(row["values"][self.RADIANT][1] for row in self.rows)
+        failed = missing and not (asked - done)
         if asked - done:
             text = f"Loading prices {done}/{asked}\u2026"
+        elif failed:
+            text = "Some prices couldn't load (marked *)"
         else:
-            text = "double-click one for its rewards" + (" (* = some prices not loaded yet)" if missing else "")
+            text = "double-click one for its rewards"
         self.status.setText(f"{len(self.rows)} relics \u00b7 {text}")
+        self.status.setStyleSheet(f"color: {theme.WARNING};" if failed else "")
+        self.retry.setVisible(bool(failed))
 
 
 class RelicLookupPage(QWidget):
@@ -258,34 +282,40 @@ class RelicLookupPage(QWidget):
         self.relics = list(relics)
         self.squad = squad
         self.relic: Optional[Relic] = None
-        self.search = QLineEdit(placeholderText="Search a relic (axi a1) or a reward (nikana prime)")
+        self.search = search_field("e.g. axi a1, or nikana prime")
+        self.search.setFixedWidth(280)
+        self.search.setToolTip("Search a relic, or a reward to see which relics drop it")
         self.search.textEdited.connect(self._on_search)
         self.results = QListWidget()
-        self.results.setMaximumWidth(230)
+        self.results.setFixedWidth(280)
         self.results.currentTextChanged.connect(self.pick)
         self.title = QLabel("Pick a relic", objectName="title")
         self.chest = QLabel()
-        self.note = QLabel(objectName="muted", wordWrap=True)
+        self.note = QLabel(objectName="footnote", wordWrap=True)
         self.summary = make_table(["Value"] + [r.title() for r in REFINEMENTS])
         self.summary.setRowCount(2)
         self.summary.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.summary.setFixedHeight(self.summary.horizontalHeader().sizeHint().height() + 2 * 36 + 4)
         self.rewards = make_table(["Reward", "Rarity", "Plat", "Ducats", "Intact", "Radiant"])
+        self.rewards.state.message("Pick a relic, or search for a reward to see which relics drop it", "search")
         self.rewards.horizontalHeaderItem(2).setIcon(QIcon(platinum_icon(14)))
         self.rewards.horizontalHeaderItem(3).setIcon(QIcon(ducat_icon(14)))
         detail = QVBoxLayout()
-        self.bar = QHBoxLayout()  # RelicSection puts the Solo / Squad picker here
-        self.bar.addWidget(self.chest)
-        self.bar.addWidget(self.title, 1)
-        detail.addLayout(self.bar)
+        detail.setSpacing(theme.SPACE_3)
+        heading = QHBoxLayout()
+        heading.setSpacing(theme.SPACE_2)
+        heading.addWidget(self.chest)
+        heading.addWidget(self.title, 1)
+        detail.addLayout(heading)
         detail.addWidget(self.summary)
         detail.addWidget(self.rewards, 1)
         detail.addWidget(self.note)
         left = QVBoxLayout()
+        left.setSpacing(theme.SPACE_2)
         left.addWidget(self.search)
         left.addWidget(self.results, 1)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(theme.SPACE_6)
         layout.addLayout(left)
         layout.addLayout(detail, 1)
         self._list([r for r in self.relics if r.vaulted is False])
@@ -332,13 +362,15 @@ class RelicLookupPage(QWidget):
         self.summary.setFixedHeight(self.summary.horizontalHeader().sizeHint().height()
                                     + self.summary.rowHeight(0) + self.summary.rowHeight(1) + 4)
         missing_any = 0
+        loading = self.data.loading()
         for row, (label, value_of, icon) in enumerate((("Plat", self.data.plat_of, platinum_icon(14)),
                                                        ("Ducats", self.data.ducats_of, ducat_icon(14)))):
             self.summary.setItem(row, 0, make_cell(label, icon=icon))
             for col, refinement in enumerate(REFINEMENTS, start=1):
                 value, missing = relic_value(relic, value_of, refinement, squad)
                 missing_any += missing
-                self.summary.setItem(row, col, make_cell(fmt(value, missing), right=True))
+                self.summary.setItem(row, col, skeleton_cell() if missing and loading else
+                                     make_cell(fmt(value, missing), right=True))
         set_rows(self.rewards, len(relic.rewards))
         order = sorted(relic.rewards, key=lambda r: ("rare", "uncommon", "common").index(r.rarity)
                        if r.rarity in ("rare", "uncommon", "common") else 3)
@@ -347,14 +379,15 @@ class RelicLookupPage(QWidget):
             name = reward.name + (f" ×{reward.count}" if reward.count > 1 else "")
             self.rewards.setItem(row, 0, make_cell(name))
             self.rewards.setItem(row, 1, make_cell(reward.rarity.title(), color=RARITY_COLOR.get(reward.rarity)))
-            self.rewards.setItem(row, 2, make_cell("…" if plat is None else fmt(plat), right=True))
+            self.rewards.setItem(row, 2, skeleton_cell() if plat is None and loading else
+                                 make_cell("—" if plat is None else fmt(plat), right=True))
             self.rewards.setItem(row, 3, make_cell(fmt(self.data.ducats_of(reward)), right=True))
             for col, refinement in ((4, "intact"), (5, "radiant")):
                 self.rewards.setItem(row, col, make_cell(f"{chance(reward.rarity, refinement) * 100:.0f}%",
                                                          right=True))
         how = "best of 4 drops (a squad opening the same relic)" if squad == 4 else "one relic, opened alone"
         self.note.setText(f"Average value per relic: {how}. "
-                          + ("* still loading some prices. " if missing_any else "")
+                          + ("* some prices couldn't load. " if missing_any and not loading else "")
                           + "Forma and other untradable rewards count as 0 plat.")
 
 
@@ -373,19 +406,21 @@ class RelicSection(Section):
         self.unvaulted = RelicTablePage(False, self.data, self.relics, squad)
         self.vaulted = RelicTablePage(True, self.data, self.relics, squad)
         self.lookup = RelicLookupPage(self.data, self.relics, squad)
-        for key, page in (("unvaulted", self.unvaulted), ("vaulted", self.vaulted), ("lookup", self.lookup)):
-            self.add_page(key, page)
         for table_page in (self.unvaulted, self.vaulted):
             table_page.open_relic.connect(self.show_relic)
         self.squad.currentIndexChanged.connect(lambda _: self.render())
         self.data.changed.connect(self.render)
-        self.squad.setFixedWidth(220)
+        self.squad.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        squad_bar = header_bar(self.squad)
+        for page in (self.unvaulted, self.vaulted, self.lookup):
+            page.header_actions = squad_bar  # one picker, on the header line of every Relics page
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.pages, 1)
+        for key, page in (("unvaulted", self.unvaulted), ("vaulted", self.vaulted), ("lookup", self.lookup)):
+            self.add_page(key, page)
 
     def page_shown(self, key: str) -> None:
-        self.page(key).bar.addWidget(self.squad)  # moves the one picker to the page on screen
         self.page(key).shown()
 
     def show_relic(self, name: str) -> None:

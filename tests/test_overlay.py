@@ -351,3 +351,20 @@ def test_given_frame_gets_no_second_look():
                               read_texts=lambda *a: ["FORMA BLUEPRINT", "~~"])
     pipeline.read(BLANK)
     assert calls == []
+
+
+def test_card_tags_say_when_ducats_win_and_when_sales_are_few():
+    from dataclasses import replace
+
+    from voidtrace.overlay import card_tags
+
+    res = EntityResolver(ITEMS).resolve("NEKROS PRIME BLUEPRINT")
+    labels = lambda card: [label for label, _fg, _bg in card_tags(card)]  # noqa: E731
+    ducats = res.item.ducats
+    assert "Ducats" in labels(RewardCard(0, res, stats("nekros_prime_blueprint", ducats / 10)))
+    assert "Ducats" not in labels(RewardCard(0, res, stats("nekros_prime_blueprint", ducats / 9)))
+    few = replace(stats("nekros_prime_blueprint", 30), trade_volume=4)
+    assert labels(RewardCard(0, res, few)) == ["Few sales"]
+    listings = replace(stats("nekros_prime_blueprint", 30), basis="listings", trade_volume=0, n_orders=12)
+    assert labels(RewardCard(0, res, listings)) == []
+    assert "Stale" in labels(RewardCard(0, res, stats("nekros_prime_blueprint", 30, stale=True)))

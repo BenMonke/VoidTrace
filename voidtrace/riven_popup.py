@@ -17,7 +17,8 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from . import theme
 from .cv_cleaner import keep_capture
-from .icons import draw_amount, platinum_icon, voidtrace_logo
+from .icons import draw_amount, platinum_icon
+from .ui.widgets import Pulse, Skeleton
 from .rivens import (
     PriceCheck,
     RivenCatalog,
@@ -37,17 +38,22 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 WIDTH = 330
-PANEL = QColor(11, 18, 32, 238)
-TEXT = QColor(230, 238, 251)
-MUTED = QColor(143, 163, 194)
-BUFF = QColor(124, 201, 156)
-CURSE = QColor(240, 110, 90)
-AMBER = QColor(230, 180, 80)
+PANEL = QColor(theme.BG_PANEL)
+PANEL.setAlphaF(0.94)
+BORDER = QColor(theme.BORDER_STRONG)
+TEXT = QColor(theme.TEXT_PRIMARY)
+MUTED = QColor(theme.TEXT_SECONDARY)
+FAINT = QColor(theme.TEXT_MUTED)
+BUFF = QColor(theme.POSITIVE)
+CURSE = QColor(theme.NEGATIVE)
+AMBER = QColor(theme.WARNING)
 
 
 def grade_color(value: int) -> QColor:
-    t = value / 100
-    return QColor(int(240 - 116 * t), int(110 + 91 * t), int(90 + 66 * t))
+    """Red (0) through amber to green (100)."""
+    from .ui.riven_find import grade_color as color
+
+    return color(value)
 
 
 class GradeBar(QWidget):
@@ -57,7 +63,7 @@ class GradeBar(QWidget):
         super().__init__()
         self.value = value
         self.letter = letter
-        self.setFixedSize(92, 16)
+        self.setFixedSize(84, 16)
         if value is not None:
             self.setToolTip(f"{value}% of the way from the worst possible roll to the best")
 
@@ -66,39 +72,55 @@ class GradeBar(QWidget):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        bar = QRectF(0, 5, 54, 6)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(34, 49, 79))
-        p.drawRoundedRect(bar, 3, 3)
-        p.setBrush(grade_color(self.value))
-        p.drawRoundedRect(QRectF(bar.x(), bar.y(), max(4.0, bar.width() * self.value / 100), bar.height()), 3, 3)
-        p.setPen(grade_color(self.value))
-        p.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
-        p.drawText(QRect(60, 0, 32, 16), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        color = grade_color(self.value)
+        p.setPen(color)
+        p.setFont(_font(12, True))
+        p.drawText(QRect(0, 0, 22, 16), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                    self.letter or f"{self.value}%")
+        bar = QRectF(28, 6, 56, 4)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(theme.BG_RAISED))
+        p.drawRoundedRect(bar, 2, 2)
+        p.setBrush(color)
+        p.drawRoundedRect(QRectF(bar.x(), bar.y(), max(4.0, bar.width() * self.value / 100), bar.height()), 2, 2)
         p.end()
 
 
+def _font(px: int, bold: bool = False) -> QFont:
+    font = QFont(theme.FONT_FAMILY)
+    font.setPixelSize(px)
+    font.setWeight(QFont.Weight.DemiBold if bold else QFont.Weight.Normal)
+    return font
+
+
 class PriceLine(QWidget):
-    """The estimate with the platinum icon, drawn like the reward-screen cards."""
+    """The estimate with the platinum icon, in the accent: a pulsing bar while it loads."""
 
     def __init__(self) -> None:
         super().__init__()
         self.text = ""
-        self.setFixedHeight(30)
+        self.loading = False
+        self.setFixedHeight(36)
+        Pulse.shared().tick.connect(lambda: self.update() if self.loading else None)
 
     def set_text(self, text: str) -> None:
-        self.text = text
+        self.text, self.loading = text, False
+        self.update()
+
+    def set_loading(self) -> None:
+        self.text, self.loading = "", True
         self.update()
 
     def paintEvent(self, _event) -> None:  # noqa: N802
-        if not self.text:
-            return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        font = QFont("Segoe UI", 15, QFont.Weight.DemiBold)
-        draw_amount(p, self.rect(), platinum_icon(20, self.devicePixelRatioF()), self.text, font,
-                    theme.accent().lighter(130), Qt.AlignmentFlag.AlignLeft)
+        if self.loading:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(Pulse.shared().color())
+            p.drawRoundedRect(QRectF(0, 9, 96, 18), theme.RADIUS_SM, theme.RADIUS_SM)
+        elif self.text:
+            draw_amount(p, self.rect(), platinum_icon(22, self.devicePixelRatioF()), self.text, _font(28, True),
+                        theme.accent(), Qt.AlignmentFlag.AlignLeft)
         p.end()
 
 
@@ -117,25 +139,28 @@ class RivenPopup(QWidget):
         self.draft: Optional[RivenDraft] = None
         self.check: Optional[PriceCheck] = None
         self.body = QVBoxLayout(self)
-        self.body.setContentsMargins(18, 14, 18, 14)
+        self.body.setContentsMargins(16, 16, 16, 16)
         self.body.setSpacing(6)
         self.price = PriceLine()
-        self.price_detail = self._label("", MUTED, 9)
+        self.price_detail = self._label("", MUTED, 12)
         self.price_detail.setWordWrap(True)
+        self.detail_skeleton = Skeleton(160, 10)
 
     # --- content ------------------------------------------------------------------------
 
-    def _label(self, text: str, color: QColor, size: int = 10, bold: bool = False) -> QLabel:
+    def _label(self, text: str, color: QColor, size: int = 12, bold: bool = False) -> QLabel:
+        """`size` in pixels."""
         label = QLabel(text)
         label.setStyleSheet(f"color: {color.name()}; background: transparent;")
-        label.setFont(QFont("Segoe UI", size, QFont.Weight.DemiBold if bold else QFont.Weight.Normal))
+        label.setFont(_font(size, bold))
         return label
 
     def _clear(self) -> None:
         # Detach at once: deleteLater alone left the previous riven's rows drawn under the new ones.
         while self.body.count():
             item = self.body.takeAt(0)
-            if item.widget() is not None and item.widget() not in (self.price, self.price_detail):
+            if item.widget() is not None and item.widget() not in (self.price, self.price_detail,
+                                                                   self.detail_skeleton):
                 _drop(item.widget())
             elif item.layout() is not None:
                 _delete_layout(item.layout())
@@ -143,7 +168,7 @@ class RivenPopup(QWidget):
     def show_reading(self) -> None:
         self.draft, self.check = None, None
         self._clear()
-        self.body.addLayout(self._header("Reading riven…"))
+        self.body.addLayout(self._header("Reading riven…", "", None))
         self._place()
 
     def show_read(self, catalog: RivenCatalog, draft: RivenDraft, warnings: list[str]) -> None:
@@ -152,10 +177,25 @@ class RivenPopup(QWidget):
         self._clear()
         weapon = grading_weapon(catalog, draft)
         title = f"{weapon.name if weapon else draft.weapon} {draft.name[:1].upper()}{draft.name[1:]}".strip()
-        self.body.addLayout(self._header(title or "Riven"))
-        legend = self._label("Roll grades: A+ best · B+ average · C worst (how well each stat rolled)", MUTED, 8)
-        legend.setWordWrap(True)
-        self.body.addWidget(legend)
+        meta = f"MR {draft.mr} · {draft.rolls} rolls"
+        if weapon is not None:
+            from .ui.riven_find import disposition_dots
+
+            meta = f"{disposition_dots(weapon.disposition)}  {meta}"
+        if draft.shown_for and weapon is not None and draft.shown_for.lower() != weapon.name.lower():
+            meta += f"\nValues as shown for {draft.shown_for} (riven strength {draft.shown_disposition:g})"
+        overall = riven_grade(catalog, weapon, draft.attrs, draft.rank) if weapon else None
+        self.body.addLayout(self._header(title or "Riven", meta, overall))
+        # Price first: what the player came for.
+        self.price.set_loading()
+        self.price_detail.setText("Checking listings…")
+        self.price_detail.hide()
+        self.detail_skeleton.show()
+        self.body.addWidget(self.price)
+        self.body.addWidget(self.price_detail)
+        self.body.addWidget(self.detail_skeleton)
+        self.body.addSpacing(6)
+        self.body.addWidget(self._divider())
         rolls = attr_rolls(catalog, weapon, draft.attrs, draft.rank) if weapon else [None] * len(draft.attrs)
         for attr, roll in zip(draft.attrs, rolls):
             g = grade(roll) if roll is not None and 0.85 <= roll <= 1.15 else None
@@ -163,62 +203,73 @@ class RivenPopup(QWidget):
             if g is not None and not attr.positive:
                 g = 100 - g  # a smaller curse is the better roll
             row = QHBoxLayout()
-            row.addWidget(self._label(catalog.format_attr(attr), BUFF if attr.positive else CURSE, 10), 1)
+            row.addWidget(self._label(catalog.format_attr(attr), BUFF if attr.positive else CURSE, 12), 1)
             row.addWidget(GradeBar(g, letter))
             self.body.addLayout(row)
-        overall = riven_grade(catalog, weapon, draft.attrs, draft.rank) if weapon else None
-        if overall is not None:
-            self.body.addWidget(self._label(f"Overall roll: {grade_from_percent(overall)}", TEXT, 10, bold=True))
-        meta = f"MR {draft.mr} · {draft.rolls} rolls · rank {draft.rank} · {draft.polarity.title()}"
-        if draft.shown_for and weapon is not None and draft.shown_for.lower() != weapon.name.lower():
-            meta += f"\nValues as shown for {draft.shown_for} (riven strength {draft.shown_disposition:g})"
-        self.body.addWidget(self._label(meta, MUTED, 9))
-        self.price.set_text("")
-        self.price_detail.setText("Checking listings…")
-        self.body.addWidget(self.price)
-        self.body.addWidget(self.price_detail)
         for warning in warnings[:2]:
-            w = self._label(warning, AMBER, 9)
+            w = self._label(warning, AMBER, 12)
             w.setWordWrap(True)
             self.body.addWidget(w)
-        self.body.addWidget(self._label("Click for details", MUTED, 8))
+        self.body.addSpacing(4)
+        self.body.addWidget(self._label("Click to open in Price check", FAINT, 11))
         self._place()
 
     def show_price(self, check: Optional[PriceCheck], error: str = "") -> None:
         self.check = check
+        self.detail_skeleton.hide()
+        self.price_detail.show()
         if error:
             self.price.set_text("")
-            self.price_detail.setText(f"No price: {error}")
+            self.price_detail.setText("No price right now")
+            self.price_detail.setToolTip(error)
         elif check is None or check.estimate is None:
             self.price.set_text("")
             self.price_detail.setText("Nobody is selling a riven for this weapon right now.")
         else:
             self.price.set_text(f"~{check.estimate:g}")
-            similar = ", similar rolls" if check.similar_rolls else ""
-            self.price_detail.setText(f"{check.count} listings with {check.tier}{similar} "
-                                      f"({check.low}-{check.high}p)")
+            similar = " that rolled alike" if check.similar_rolls else ""
+            self.price_detail.setText(f"{check.low} to {check.high}p · {check.count} similar listings{similar}")
+            self.price_detail.setToolTip(f"Compared with listings with {check.tier}.")
         self._place()
 
     def show_failed(self, message: str) -> None:
         self.draft, self.check = None, None
         self._clear()
-        self.body.addLayout(self._header("Riven not read"))
-        w = self._label(message, AMBER, 9)
+        self.body.addLayout(self._header("Riven not read", "", None))
+        w = self._label(message, AMBER, 12)
         w.setWordWrap(True)
         self.body.addWidget(w)
-        self.body.addWidget(self._label("Click for the full price check", MUTED, 8))
+        self.body.addWidget(self._label("Click to open in Price check", FAINT, 11))
         self._place()
 
-    def _header(self, title: str) -> QHBoxLayout:
+    def _header(self, title: str, meta: str, overall: Optional[int]) -> QHBoxLayout:
+        """Weapon and riven name, the disposition and MR under it, the overall grade in a tile."""
         row = QHBoxLayout()
-        logo = QLabel()
-        logo.setPixmap(voidtrace_logo(20, self.devicePixelRatioF()))
-        logo.setStyleSheet("background: transparent;")
-        row.addWidget(logo)
-        name = self._label(title, TEXT, 12, bold=True)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        name = self._label(title, TEXT, 15, bold=True)
         name.setWordWrap(True)
-        row.addWidget(name, 1)
+        text.addWidget(name)
+        if meta:
+            text.addWidget(self._label(meta, MUTED, 12))
+        row.addLayout(text, 1)
+        if overall is not None:
+            color = grade_color(overall)
+            tile = self._label(grade_from_percent(overall), color, 15, bold=True)
+            tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tile.setFixedSize(40, 40)
+            tile.setToolTip("Overall roll: A+ best, B+ average, C worst")
+            tile.setStyleSheet(f"color: {color.name()}; border-radius: 8px;"
+                               f" background: rgba({color.red()}, {color.green()}, {color.blue()}, 36);")
+            row.addWidget(tile, 0, Qt.AlignmentFlag.AlignTop)
         return row
+
+    @staticmethod
+    def _divider() -> QWidget:
+        line = QWidget()
+        line.setFixedHeight(1)
+        line.setStyleSheet(f"background: {theme.BORDER_SUBTLE};")
+        return line
 
     # --- window -------------------------------------------------------------------------
 
@@ -233,9 +284,9 @@ class RivenPopup(QWidget):
     def paintEvent(self, _event) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(theme.accent(), 1.5))
+        p.setPen(QPen(BORDER, 1))
         p.setBrush(PANEL)
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 10, 10)
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), theme.RADIUS_MD, theme.RADIUS_MD)
         p.end()
 
     def mousePressEvent(self, event) -> None:  # noqa: N802

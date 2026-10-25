@@ -12,12 +12,14 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional, Sequence
 
-from PyQt6.QtCore import QObject, QRect, Qt, QTimer, pyqtSignal
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtCore import (QEasingCurve, QObject, QParallelAnimationGroup, QPoint, QPropertyAnimation, QRect, Qt,
+                          QTimer, pyqtSignal)
+from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from . import settings, theme
 from .account import Account
 from .items import CatalogItem
+from .ui.widgets import animations_enabled
 from .trades import (OrderChange, Trade, TradeHistory, TradeReader, apply_changes, item_finder, plan_changes,
                      summary, undo)
 
@@ -27,14 +29,20 @@ SETTING = "trade_updates"
 SHOW_MS = 10_000
 NOTE_MS = 4_000
 
-TOAST_STYLE = """
-QWidget#toast { background: #0b1220; border: 1px solid #4fa3ff; border-radius: 8px; }
-QLabel { color: #dbe6ff; background: transparent; }
-QLabel#title { color: #4fa3ff; font-weight: 600; }
-QPushButton { background: #4fa3ff; color: #0b0d10; border: none; border-radius: 4px; padding: 5px 14px;
-              font-weight: 600; }
-QPushButton:hover { background: #6eb3ff; }
+TOAST_STYLE = f"""
+QFrame#toast {{ background: rgba(22, 25, 31, 240); border: 1px solid {theme.BORDER_STRONG};
+    border-left: 2px solid {theme.DEFAULT_ACCENT}; border-radius: 8px; }}
+QLabel {{ color: {theme.TEXT_PRIMARY}; background: transparent; font-family: {theme.FONT_STACK}; font-size: 12px; }}
+QLabel#title {{ font-size: 13px; font-weight: 600; }}
+QLabel#title[error="true"] {{ color: {theme.NEGATIVE}; }}
+QPushButton {{ background: {theme.BG_RAISED}; color: {theme.TEXT_PRIMARY}; border: 1px solid {theme.BORDER_STRONG};
+    border-radius: 4px; padding: 0 12px; min-height: 30px; font-family: {theme.FONT_STACK}; font-size: 13px; }}
+QPushButton:hover {{ background: {theme.BG_HOVER}; }}
+QPushButton:pressed {{ background: {theme.BG_PANEL}; }}
+QPushButton:disabled {{ color: {theme.TEXT_MUTED}; }}
 """
+WIDTH = 320
+SLIDE = 12  # px the card travels as it slides in and out
 
 
 def enabled() -> bool:
@@ -42,61 +50,111 @@ def enabled() -> bool:
 
 
 class TradeToast(QWidget):
-    """The small card: what the trade changed, and an Undo button."""
+    """The small card: what the trade changed, and an Undo button. Slides in at the top right."""
 
     def __init__(self, screen: QRect) -> None:
         super().__init__(None)
-        self.setObjectName("toast")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
                             | Qt.WindowType.Tool | Qt.WindowType.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)  # the card is 94% opaque
         self.screen_rect = screen
-        self.title = QLabel("VoidTrace · orders updated", objectName="title")
-        self.text = QLabel()
+        self.card = QFrame(objectName="toast")
+        self.title = QLabel("Orders updated", objectName="title")
+        self.text = QLabel(wordWrap=True)
         self.undo_button = QPushButton("Undo")
         self.undo_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.undo_button.clicked.connect(self._undo_clicked)
-        row = QHBoxLayout()
-        row.addWidget(self.text, 1)
-        row.addWidget(self.undo_button, 0, Qt.AlignmentFlag.AlignBottom)
+        inner = QVBoxLayout(self.card)
+        inner.setContentsMargins(12, 12, 12, 12)
+        inner.setSpacing(4)
+        inner.addWidget(self.title)
+        inner.addWidget(self.text)
+        inner.addWidget(self.undo_button, 0, Qt.AlignmentFlag.AlignRight)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 12)
-        layout.addWidget(self.title)
-        layout.addLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.card)
+        self.setFixedWidth(WIDTH)
         theme.follow(self, TOAST_STYLE)
         self._on_undo: Optional[Callable[[], None]] = None
         self._timer = QTimer(self, singleShot=True)
-        self._timer.timeout.connect(self.hide)
+        self._timer.timeout.connect(self.slide_out)
+        self._slide = QPropertyAnimation(self, b"pos", self)
+        self._fade = QPropertyAnimation(self, b"windowOpacity", self)
+        self._motion = QParallelAnimationGroup(self)
+        self._motion.addAnimation(self._slide)
+        self._motion.addAnimation(self._fade)
+        self._motion.finished.connect(lambda: self.hide() if self._leaving else None)
+        self._leaving = False
 
     def show_changes(self, text: str, on_undo: Callable[[], None]) -> None:
-        self.title.setText("VoidTrace · orders updated")
+        self._set_title("Orders updated")
         self.text.setText(text)
         self._on_undo = on_undo
         self.undo_button.setEnabled(True)
         self.undo_button.show()
         self._pop(SHOW_MS)
 
-    def show_note(self, text: str) -> None:
+    def show_note(self, text: str, error: bool = False) -> None:
         """A short message without Undo (the undo result, or why nothing was changed)."""
+        self._set_title("Couldn't update orders" if error else "Undone")
         self.text.setText(text)
         self.undo_button.hide()
         self._on_undo = None
         self._pop(NOTE_MS)
 
+    def _set_title(self, text: str) -> None:
+        self.title.setText(text)
+        self.title.setProperty("error", text.startswith("Couldn't"))
+        self.title.style().unpolish(self.title)
+        self.title.style().polish(self.title)
+
     def _undo_clicked(self) -> None:
         if self._on_undo is not None:
             self.undo_button.setEnabled(False)
-            self.text.setText(self.text.text() + "\nPutting them back…")
+            self.undo_button.setText("Undoing…")
             callback, self._on_undo = self._on_undo, None
             callback()
 
+    def _home(self) -> QPoint:
+        return QPoint(self.screen_rect.right() - self.width() - 24, self.screen_rect.top() + 24)
+
+    def _animate(self, start: QPoint, end: QPoint, opacity: tuple[float, float], ms: int,
+                 curve: QEasingCurve.Type) -> None:
+        self._motion.stop()
+        for anim, a, b in ((self._slide, start, end), (self._fade, *opacity)):
+            anim.setStartValue(a)
+            anim.setEndValue(b)
+            anim.setDuration(ms)
+            anim.setEasingCurve(curve)
+        self._motion.start()
+
     def _pop(self, ms: int) -> None:
+        self.undo_button.setText("Undo")
         self.adjustSize()
-        self.move(self.screen_rect.right() - self.width() - 24, self.screen_rect.top() + 24)
-        self.show()
+        home = self._home()
+        self._leaving = False
+        if not self.isVisible() and animations_enabled():
+            self.move(home + QPoint(SLIDE, 0))
+            self.setWindowOpacity(0.0)
+            self.show()
+            self._animate(home + QPoint(SLIDE, 0), home, (0.0, 1.0), 150, QEasingCurve.Type.OutCubic)
+        else:
+            self._motion.stop()
+            self.move(home)
+            self.setWindowOpacity(1.0)
+            self.show()
         self.raise_()
         self._timer.start(ms)
+
+    def slide_out(self) -> None:
+        if not self.isVisible():
+            return
+        if not animations_enabled():
+            self.hide()
+            return
+        self._leaving = True
+        self._animate(self.pos(), self.pos() + QPoint(SLIDE, 0), (1.0, 0.0), 120, QEasingCurve.Type.InCubic)
 
 
 class TradeTracker(QObject):
@@ -140,6 +198,7 @@ class TradeTracker(QObject):
             done = apply_changes(self.account, changes)
         except Exception as exc:
             log.warning("trade: could not check your orders: %s", exc)
+            self.note.emit(f"Could not check your orders: {exc}")
             return []
         if done:
             log.info("trade: updated %d order(s)", len(done))
@@ -161,7 +220,7 @@ class TradeTracker(QObject):
         self.on_orders_changed()
 
     def _note(self, text: str) -> None:
-        self.toast.show_note(text)
+        self.toast.show_note(text, error=text.startswith("Could not"))
         self.on_orders_changed()
 
     def shutdown(self) -> None:

@@ -8,26 +8,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QGridLayout,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
+from .. import svg_icons, theme
 from ..account import MarketError, NotSignedIn
-from ..icons import eye_icon, platinum_icon
+from ..icons import platinum_icon
 from ..rivens import PriceCheck, RivenAuction, RivenDraft, price_check, valid_names
-from .widgets import Stepper, make_cell, make_table, set_rows
+from .widgets import (Notice, Stepper, card, form_rows, header_bar, icon_button, make_cell, make_table,
+                      refresh_button, set_rows, show_sort)
 from .widgets import BUFF_COLOR, CURSE_COLOR, MUTED
 
 if TYPE_CHECKING:
@@ -45,12 +44,10 @@ class SellPanel(QWidget):
         super().__init__()
         self.window_ = window
         self.draft: Optional[RivenDraft] = None
-        self.summary = QLabel("Fill in your riven on the Price check tab, then press “Sell this riven…”.")
+        self.summary = QLabel("Fill in your riven on Price check, then press Sell this riven\u2026")
         self.summary.setWordWrap(True)
         self.summary.setTextFormat(Qt.TextFormat.RichText)
-        self.name_warning = QLabel()
-        self.name_warning.setStyleSheet("color: #e6b450;")  # amber: Post would fail
-        self.name_warning.setWordWrap(True)
+        self.name_warning = Notice("warning")  # Post would fail
         self.buyout = Stepper(1, 100000, 100)
         self.direct = QCheckBox("Direct sale (no bidding)")
         self.direct.setChecked(True)
@@ -59,33 +56,33 @@ class SellPanel(QWidget):
         self.visible = QCheckBox("Visible on Warframe.Market")
         self.visible.setChecked(True)
         self.note = QLineEdit(placeholderText="Note for buyers (optional)")
+        self.note.setFixedWidth(theme.FIELD_MAX_WIDTH)
         self.post_button = QPushButton("Post riven", objectName="primary")
         self.post_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.result = QLabel(objectName="toast")
+        self.result = QLabel(objectName="status")
         self.result.setWordWrap(True)
+        self.error = Notice("error")
+        self.empty = QLabel(objectName="muted")
+        self.empty.setText("Fill in your riven on Price check, then press Sell this riven\u2026")
 
-        form = QGridLayout()
-        form.addWidget(QLabel("Buyout"), 0, 0)
-        form.addWidget(self.buyout, 0, 1)
-        form.addWidget(self.direct, 0, 2)
-        form.addWidget(QLabel("Starting bid"), 1, 0)
-        form.addWidget(self.starting, 1, 1)
-        form.addWidget(QLabel("Min. reputation"), 2, 0)
-        form.addWidget(self.reputation, 2, 1)
-        form.addWidget(self.visible, 2, 2)
-        form.setColumnStretch(3, 1)
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.post_button)
-        buttons.addStretch(1)
+        self.summary_card, summary = card()
+        summary.addWidget(self.summary)
+        self.form_card, form = card()
+        form.addLayout(form_rows([("Buyout", self.buyout), ("", self.direct), ("Starting bid", self.starting),
+                                  ("Min. reputation", self.reputation), ("", self.visible), ("Note", self.note)]))
+        form.addSpacing(theme.SPACE_2)
+        form.addWidget(self.post_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.form_card.setMaximumWidth(720)
+        self.summary_card.setMaximumWidth(720)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 0)
-        layout.addWidget(self.summary)
+        layout.setSpacing(theme.SPACE_4)
+        layout.addWidget(self.empty)
+        layout.addWidget(self.summary_card)
         layout.addWidget(self.name_warning)
-        layout.addLayout(form)
-        layout.addWidget(self.note)
-        layout.addLayout(buttons)
-        layout.addWidget(self.result)
+        layout.addWidget(self.error)
+        layout.addWidget(self.form_card)
         layout.addStretch(1)
+        self.status_line = self.result
 
         self.direct.toggled.connect(self._direct_changed)
         self.buyout.valueChanged.connect(self._buyout_changed)
@@ -96,15 +93,16 @@ class SellPanel(QWidget):
     def load(self, draft: RivenDraft, check: Optional[PriceCheck]) -> None:
         self.draft = draft
         self.result.setText("")
+        self.error.show_text("")
         if check is not None and check.estimate is not None:
             self.buyout.setValue(max(1, round(check.estimate)))
         catalog = self.window_.catalog
         weapon = catalog.by_weapon.get(draft.weapon)
         title = f"{weapon.name if weapon else draft.weapon} {draft.name[:1].upper()}{draft.name[1:]}".strip()
         lines = "<br>".join(
-            f'<span style="color:{"#7cc99c" if a.positive else "#f06e5a"}">{catalog.format_attr(a)}</span>'
+            f'<span style="color:{theme.POSITIVE if a.positive else theme.NEGATIVE}">{catalog.format_attr(a)}</span>'
             for a in draft.attrs)
-        self.summary.setText(f'<b>{title}</b> &nbsp;<span style="color:#8fa3c2">MR {draft.mr} · '
+        self.summary.setText(f'<b>{title}</b> &nbsp;<span style="color:{theme.TEXT_SECONDARY}">MR {draft.mr} · '
                              f'{draft.rolls} rolls · rank {draft.rank} · {draft.polarity}</span><br>{lines}')
         names = valid_names(catalog, draft.positives)
         if not draft.name:
@@ -121,6 +119,9 @@ class SellPanel(QWidget):
         signed_in = self.window_.account.signed_in
         self.post_button.setText("Post riven" if signed_in else "Sign in to post")
         self.post_button.setEnabled(self.draft is not None or not signed_in)
+        for w in (self.summary_card, self.form_card):
+            w.setVisible(self.draft is not None)
+        self.empty.setVisible(self.draft is None)
 
     def _direct_changed(self, direct: bool) -> None:
         self.starting.setEnabled(not direct)
@@ -141,6 +142,8 @@ class SellPanel(QWidget):
         starting = buyout if self.direct.isChecked() else self.starting.value()
         reputation, visible, note = self.reputation.value(), self.visible.isChecked(), self.note.text().strip()
         self.post_button.setEnabled(False)
+        self.post_button.setText("Posting…")
+        self.error.show_text("")
         self.result.setText("Posting…")
         self.window_.run_async(
             lambda: self.window_.account.create_riven_auction(draft, buyout, starting, reputation, visible, note),
@@ -158,13 +161,13 @@ class SellPanel(QWidget):
         if isinstance(exc, NotSignedIn):
             self.window_.account_changed()
         self.result.setText(_error_text(exc))
+        self.error.show_text(_error_text(exc), "error")
 
 
 class MyRivensPanel(QWidget):
     COLUMNS = ["", "Riven", "Buffs", "Curse", "Price", "", ""]
     EYE, RIVEN, BUFFS, CURSE, PRICE, MATCH, CLOSE = range(7)
     SORTABLE = {EYE, RIVEN, PRICE}
-    HEADER_TEXT = {EYE: "", RIVEN: "Riven", PRICE: "Price"}
 
     def __init__(self, window: "RivenSection") -> None:
         super().__init__()
@@ -178,21 +181,17 @@ class MyRivensPanel(QWidget):
         header.setSectionResizeMode(self.RIVEN, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(self.BUFFS, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeaderItem(self.PRICE).setIcon(QIcon(platinum_icon(14)))
-        self.table.horizontalHeaderItem(self.EYE).setIcon(QIcon(eye_icon(14, True)))
-        self.status = QLabel(objectName="muted")
+        self.table.horizontalHeaderItem(self.EYE).setIcon(svg_icons.icon("eye", theme.TEXT_SECONDARY, 14))
+        self.status = QLabel(objectName="status")
         self.state_filter = QComboBox()
         for label, value in (("All rivens", None), ("Visible", True), ("Hidden", False)):
             self.state_filter.addItem(label, value)
         self.state_filter.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.state_filter.currentIndexChanged.connect(lambda _: self._render())
-        self.reload = QPushButton("Refresh")
-        top = QHBoxLayout()
-        top.addWidget(self.status, 1)
-        top.addWidget(self.state_filter)
-        top.addWidget(self.reload)
+        self.reload = refresh_button()
+        self.header_actions = header_bar(self.state_filter, self.reload)
+        self.status_line = self.status
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 0)
-        layout.addLayout(top)
         layout.addWidget(self.table, 1)
         self.reload.clicked.connect(self.refresh)
         self.sort_col, self.sort_desc = self.EYE, False
@@ -208,14 +207,19 @@ class MyRivensPanel(QWidget):
             self.auctions = []
             self._render()
             self.status.setText("Sign in to see your riven auctions.")
+            self.table.state.message("Sign in to see your rivens", "user", button="Sign in",
+                                     on_click=self.window_.show_sign_in, primary=True)
             return
         self.status.setText(f"{note}  Refreshing…" if note else "Loading your rivens…")
+        if not self.auctions:
+            self.table.state.loading()
         self.window_.run_async(self.window_.account.my_auctions, self._show, self._failed)
 
     def _failed(self, exc: Exception) -> None:
         if isinstance(exc, NotSignedIn):
             self.window_.account_changed()
         self.status.setText(_error_text(exc))
+        self.table.state.error(retry=self.refresh)
 
     def _show(self, auctions: list[RivenAuction]) -> None:
         self.auctions = auctions
@@ -232,10 +236,7 @@ class MyRivensPanel(QWidget):
         self._render()
 
     def _update_header(self) -> None:
-        for col, text in self.HEADER_TEXT.items():
-            arrow = (" ▼" if self.sort_desc else " ▲") if col == self.sort_col else ""
-            self.table.horizontalHeaderItem(col).setText(text + arrow)
-            self.table.horizontalHeaderItem(col).setToolTip("Click to sort")
+        show_sort(self.table, self.sort_col, self.sort_desc)
 
     def sorted_auctions(self, auctions: list[RivenAuction]) -> list[RivenAuction]:
         title = self.window_.catalog.riven_title
@@ -244,7 +245,7 @@ class MyRivensPanel(QWidget):
                self.PRICE: lambda a: a.price or 0}[self.sort_col]
         return sorted(ordered, key=key, reverse=self.sort_desc)
 
-    def _button(self, text: str, name: str = "small") -> QPushButton:
+    def _button(self, text: str, name: str = "ghost") -> QPushButton:
         b = QPushButton(text, objectName=name)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
         return b
@@ -263,12 +264,9 @@ class MyRivensPanel(QWidget):
         catalog = self.window_.catalog
         widths = {self.MATCH: 0, self.CLOSE: 0}
         for r, a in enumerate(self.shown):
-            eye = QToolButton(objectName="eye")
-            eye.setIcon(QIcon(eye_icon(18, a.visible)))
-            eye.setIconSize(QSize(18, 18))
-            eye.setCursor(Qt.CursorShape.PointingHandCursor)
-            eye.setToolTip("Visible on Warframe.Market. Click to hide." if a.visible else
-                           "Hidden from Warframe.Market. Click to show.")
+            eye = icon_button("eye" if a.visible else "eye-off",
+                              "Visible on Warframe.Market. Click to hide." if a.visible else
+                              "Hidden from Warframe.Market. Click to show.")
             eye.clicked.connect(lambda _=False, auction=a: self.toggle_visible(auction))
             self.table.setCellWidget(r, self.EYE, eye)
             self.table.setItem(r, self.RIVEN, make_cell(catalog.riven_title(a), color=None if a.visible else MUTED))
@@ -278,24 +276,28 @@ class MyRivensPanel(QWidget):
                                                     or "none", color=CURSE_COLOR if a.negative else MUTED))
             self.table.setItem(r, self.PRICE, make_cell(str(a.price), right=True, icon=platinum_icon(14)))
             match = self._button("Match lowest")
-            match.clicked.connect(lambda _=False, auction=a: self.reprice(auction))
-            close = self._button("Close", "danger")
+            match.clicked.connect(lambda _=False, auction=a, b=match: (b.setText("Matching\u2026"),
+                                                                       self.reprice(auction)))
+            close = icon_button("trash", "Close this auction", theme.NEGATIVE)
             close.clicked.connect(lambda _=False, auction=a: self.close_auction(auction))
             self.table.setCellWidget(r, self.MATCH, match)
             self.table.setCellWidget(r, self.CLOSE, close)
             for col, button in ((self.MATCH, match), (self.CLOSE, close)):
+                button.ensurePolished()  # measure with the stylesheet applied, or "Match lowest" clips
                 widths[col] = max(widths[col], button.sizeHint().width())
         header = self.table.horizontalHeader()
         for col, width in widths.items():
             if width:
                 header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-                self.table.setColumnWidth(col, width + 12)
-        self.table.setColumnWidth(self.EYE, 40)
+                self.table.setColumnWidth(col, width + 40)  # room for the cell margins Qt adds
+        self.table.setColumnWidth(self.EYE, 56)
         self.table.resizeRowsToContents()
         hidden = sum(not a.visible for a in self.auctions)
         total = f"{len(self.auctions)} rivens" + (f", {hidden} hidden" if hidden else "")
         if not self.auctions:
             text = "You have no riven auctions." if self.window_.account.signed_in else self.status.text()
+            if self.window_.account.signed_in:
+                self.table.state.message("No riven auctions. Post one from Sell.")
         elif len(self.shown) != len(self.auctions):
             text = f"Showing {len(self.shown)} of {total}"
         else:

@@ -254,3 +254,27 @@ def test_refilling_a_full_table_stays_fast(qapp):
     qapp.processEvents()
     assert time.perf_counter() - started < 1.0
     page.close()
+
+
+def test_prices_still_loading_show_skeletons_not_zero(qapp):
+    from voidtrace.ui.widgets import SKELETON
+
+    gate = threading.Event()
+
+    class Slow(FakePrices):
+        def get_price(self, slug):
+            gate.wait(3)
+            return super().get_price(slug)
+
+    section = RelicSection(ITEMS, Slow(), [OPEN])
+    section.show()
+    section.show_page("unvaulted")
+    qapp.processEvents()
+    cell = section.unvaulted.table.item(0, 4)
+    assert cell.data(SKELETON) and cell.text() == ""
+    assert section.unvaulted.table.item(0, 7).data(SKELETON)  # best reward too
+    gate.set()
+    settle(qapp, section)
+    cell = section.unvaulted.table.item(0, 4)
+    assert not cell.data(SKELETON) and float(cell.text()) > 0
+    section.shutdown()

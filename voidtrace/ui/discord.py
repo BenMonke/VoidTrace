@@ -28,19 +28,24 @@ class DiscordDialog(QDialog):
         self.status = QLabel(notifier.last_error or ("Connected." if notifier.url() else "Not connected."),
                              objectName="muted", wordWrap=True)
         buttons = QHBoxLayout()
-        for text, slot, name in (("Save", self.save, "primary"), ("Send test", self.send_test, ""),
-                                 ("Remove", self.remove, "danger")):
+        for text, slot, name in (("Remove", self.remove, "danger"), ("Send test", self.send_test, ""),
+                                 ("Save", self.save, "primary")):
             button = QPushButton(text, objectName=name)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.clicked.connect(slot)
             buttons.addWidget(button)
+            if name == "danger":
+                buttons.addStretch(1)  # Remove sits apart, on the left
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(8)
         layout.addWidget(QLabel(HOW_TO, objectName="muted", wordWrap=True))
         layout.addWidget(self.link)
         for box in self.boxes.values():
             layout.addWidget(box)
-        layout.addLayout(buttons)
         layout.addWidget(self.status)
+        layout.addSpacing(8)
+        layout.addLayout(buttons)
         self.resize(460, 0)
 
     def save(self) -> bool:

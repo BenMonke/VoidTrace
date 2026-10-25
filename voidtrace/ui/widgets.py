@@ -5,25 +5,32 @@ the base of the Market, Rivens and Relics sections of the main window."""
 from __future__ import annotations
 
 import logging
+import math
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from typing import Callable, Optional
 
-from PyQt6.QtCore import QEvent, QObject, QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QIcon
+from PyQt6 import sip
+from PyQt6.QtCore import QEvent, QObject, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QIcon, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QAbstractSpinBox,
+    QButtonGroup,
     QComboBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
+    QPushButton,
     QSpinBox,
     QStackedWidget,
     QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -76,6 +83,8 @@ QHeaderView::down-arrow {{ image: url({CHEVRON_DOWN}); width: 12px; height: 12px
 QLabel {{ background: transparent; }}
 QLabel#title {{ font-size: 20px; font-weight: 600; }}
 QLabel#heading {{ font-size: 15px; font-weight: 600; }}
+QLabel#pricetag {{ font-weight: 600; }}
+QLabel#stat {{ font-size: 24px; font-weight: 600; }}
 QLabel#caption {{ font-size: 11px; font-weight: 600; color: {T.TEXT_SECONDARY}; letter-spacing: 0.4px; }}
 QLabel#toast {{ color: {T.TEXT_PRIMARY}; font-size: 12px; border: 1px solid transparent; padding: 4px 12px; }}
 QLabel#toast[shown="true"] {{ background: {T.BG_RAISED}; border-color: {T.BORDER_STRONG}; border-radius: 4px; }}
@@ -263,20 +272,110 @@ class Stepper(QFrame):
         self.box.setValue(value)
 
 
+def animations_enabled() -> bool:
+    """Windows' "Show animations" setting (SPI_GETCLIENTAREAANIMATION); on elsewhere."""
+    try:
+        import ctypes
+
+        on = ctypes.c_int(1)
+        ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(on), 0)
+        return bool(on.value)
+    except (AttributeError, OSError):
+        return True
+
+
+class Pulse(QObject):
+    """The one animation every skeleton follows: 1.2 s between BG_RAISED and BG_HOVER, in sync.
+
+    It runs only while something keeps drawing skeletons (`color()` marks it used), and stops by
+    itself a few frames after the last one is gone. Static when Windows animations are off.
+    """
+
+    tick = pyqtSignal()
+    _shared: Optional["Pulse"] = None
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.anim = QVariantAnimation(self, startValue=0.0, endValue=1.0, duration=1200, loopCount=-1)
+        self.anim.valueChanged.connect(self._tick)
+        self.used = False
+        self.idle = 0
+        self.raised, self.hover = QColor(T.BG_RAISED), QColor(T.BG_HOVER)
+
+    @classmethod
+    def shared(cls) -> "Pulse":
+        if cls._shared is None or sip.isdeleted(cls._shared):  # a new QApplication (tests) starts afresh
+            cls._shared = cls()
+        return cls._shared
+
+    def color(self) -> QColor:
+        self.used = True
+        if self.anim.state() != QVariantAnimation.State.Running:
+            if not animations_enabled():
+                return self.raised
+            self.idle = 0
+            self.anim.start()
+        t = self.anim.currentValue() or 0.0
+        return T.mix(self.hover, self.raised, 0.5 - 0.5 * math.cos(2 * math.pi * t))  # sine in-out
+
+    def _tick(self, _value) -> None:
+        self.idle = 0 if self.used else self.idle + 1
+        self.used = False
+        if self.idle > 3:
+            self.anim.stop()
+        self.tick.emit()
+
+
+class Skeleton(QWidget):
+    """A pulsing placeholder bar in the shape of the content it stands in for."""
+
+    def __init__(self, width: int = 80, height: int = 10, radius: int = T.RADIUS_SM) -> None:
+        super().__init__()
+        self.radius = radius
+        self.setFixedHeight(height)
+        self.setMinimumWidth(width)
+        self.setMaximumWidth(width)
+        Pulse.shared().tick.connect(self.update)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(Pulse.shared().color())
+        p.drawRoundedRect(QRectF(self.rect()), self.radius, self.radius)
+
+
+SKELETON = Qt.ItemDataRole.UserRole + 50  # a cell whose value is still loading: drawn as a pulsing bar
+
+
+def skeleton_cell(width: int = 36) -> QTableWidgetItem:
+    item = QTableWidgetItem("")
+    item.setData(SKELETON, width)
+    return item
+
+
 class RowHover(QStyledItemDelegate):
-    """Lights the whole row under the mouse; a stylesheet can only light one cell."""
+    """Lights the whole row under the mouse (a stylesheet can only light one cell), and draws
+    skeleton cells."""
 
     def __init__(self, table: QTableWidget) -> None:
         super().__init__(table)
         self.row = -1
         self.fill = QColor(T.BG_HOVER)
+        self.pulsing = False
         table.setMouseTracking(True)
         table.entered.connect(lambda index: self._set(index.row()))
         table.viewport().installEventFilter(self)
+        Pulse.shared().tick.connect(self._pulse)
 
     def _set(self, row: int) -> None:
         if row != self.row:
             self.row = row
+            self.parent().viewport().update()
+
+    def _pulse(self) -> None:
+        if self.pulsing:  # only while the last paint drew a skeleton cell
+            self.pulsing = False
             self.parent().viewport().update()
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt naming)
@@ -287,7 +386,125 @@ class RowHover(QStyledItemDelegate):
     def paint(self, painter, option, index) -> None:
         if index.row() == self.row:
             painter.fillRect(option.rect, self.fill)
+        width = index.data(SKELETON)
+        if width:
+            self.pulsing = True
+            r = option.rect
+            w = min(int(width), r.width() - 24)
+            right = index.data(Qt.ItemDataRole.TextAlignmentRole)
+            x = r.right() - 12 - w if right and int(right) & int(Qt.AlignmentFlag.AlignRight) else r.left() + 12
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(Pulse.shared().color())
+            painter.drawRoundedRect(QRectF(x, r.center().y() - 4, w, 10), T.RADIUS_SM, T.RADIUS_SM)
+            painter.restore()
+            painter.setPen(QColor(T.BORDER_SUBTLE))
+            painter.drawLine(r.bottomLeft(), r.bottomRight())
+            return
         super().paint(painter, option, index)
+
+
+class TableState(QWidget):
+    """What a table shows instead of rows: loading skeleton rows, or one centred message (empty,
+    nothing asked yet, error) with an optional button. The header stays real."""
+
+    def __init__(self, table: QTableWidget) -> None:
+        super().__init__(table.viewport())
+        self.table = table
+        self.mode = ""
+        self.rows = 8
+        self.icon = QLabel(alignment=Qt.AlignmentFlag.AlignCenter)
+        self.text = QLabel(objectName="muted", alignment=Qt.AlignmentFlag.AlignCenter)
+        self.text.setStyleSheet(f"font-size: 13px; color: {T.TEXT_SECONDARY};")
+        self.button = QPushButton()
+        self.button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.button.hide()
+        self._on_click: Optional[Callable[[], None]] = None
+        self.button.clicked.connect(lambda: self._on_click() if self._on_click else None)
+        box = QVBoxLayout(self)
+        box.addStretch(1)
+        line = QHBoxLayout()
+        line.addStretch(1)
+        line.addWidget(self.icon)
+        line.addWidget(self.text)
+        line.addStretch(1)
+        line.setSpacing(T.SPACE_2)
+        box.addLayout(line)
+        box.addSpacing(T.SPACE_3)
+        box.addWidget(self.button, 0, Qt.AlignmentFlag.AlignHCenter)
+        box.addStretch(1)
+        table.viewport().installEventFilter(self)
+        Pulse.shared().tick.connect(lambda: self.update() if self.mode == "loading" and self.isVisible() else None)
+        self.hide()
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt naming)
+        if event.type() == QEvent.Type.Resize:
+            self.setGeometry(self.parent().rect())
+        return False
+
+    def loading(self, rows: int = 8) -> None:
+        self.mode, self.rows = "loading", rows
+        set_rows(self.table, 0)
+        for w in (self.icon, self.text, self.button):
+            w.hide()
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._show()
+
+    def message(self, text: str, icon: str = "info", tone: str = T.TEXT_SECONDARY,
+                button: str = "", on_click: Optional[Callable[[], None]] = None, primary: bool = False) -> None:
+        """Empty or error: icon + one line, and a button for the next step."""
+        self.mode = "message"
+        self.icon.setPixmap(svg_icons.pixmap(icon, tone, 16))
+        self.text.setText(text)
+        self.icon.show()
+        self.text.show()
+        self.button.setText(button)
+        self.button.setObjectName("primary" if primary else "")
+        self.button.style().unpolish(self.button)
+        self.button.style().polish(self.button)
+        self.button.setVisible(bool(button))
+        self._on_click = on_click
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self._show()
+
+    def error(self, text: str = "Couldn't reach Warframe.Market.", retry: Optional[Callable[[], None]] = None) -> None:
+        if self.table.rowCount():  # rows already shown stay; the page's status line says what failed
+            self.clear()
+            return
+        self.message(text, "alert", T.NEGATIVE, "Retry" if retry else "", retry)
+
+    def clear(self) -> None:
+        self.mode = ""
+        self.hide()
+
+    def _show(self) -> None:
+        self.setGeometry(self.parent().rect())
+        self.show()
+        self.raise_()
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        if self.mode != "loading":
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = Pulse.shared().color()
+        line = QColor(T.BORDER_SUBTLE)
+        header = self.table.horizontalHeader()
+        for row in range(self.rows):
+            top = row * T.ROW_HEIGHT
+            for col in range(self.table.columnCount()):
+                if self.table.isColumnHidden(col) or header.sectionSize(col) < 28:
+                    continue
+                width = header.sectionSize(col) - 24
+                share = 0.6 + 0.2 * (((row * 7 + col * 3) % 5) / 4)  # 60 to 80%, varied per row
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(color)
+                p.drawRoundedRect(QRectF(header.sectionViewportPosition(col) + 12, top + 13,
+                                         max(12, width * share), 10), T.RADIUS_SM, T.RADIUS_SM)
+            p.setPen(line)
+            p.drawLine(0, top + T.ROW_HEIGHT - 1, self.width(), top + T.ROW_HEIGHT - 1)
 
 
 def make_table(columns: list[str]) -> QTableWidget:
@@ -311,6 +528,7 @@ def make_table(columns: list[str]) -> QTableWidget:
     font.setCapitalization(QFont.Capitalization.AllUppercase)
     font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.4)
     header.setFont(font)
+    t.state = TableState(t)
     return t
 
 
@@ -319,6 +537,9 @@ def set_rows(table: QTableWidget, count: int) -> None:
     the fit-to-contents columns re-measure every row for each new cell (752 relics froze the window)."""
     table.setRowCount(0)
     table.setRowCount(count)
+    state = getattr(table, "state", None)
+    if count and state is not None and state.mode:
+        state.clear()  # rows arrived: they replace the skeleton or message in place
 
 
 def make_cell(text: str, right: bool = False, icon=None, color: Optional[QColor] = None) -> QTableWidgetItem:
@@ -330,6 +551,186 @@ def make_cell(text: str, right: bool = False, icon=None, color: Optional[QColor]
     if color is not None:
         item.setForeground(color)
     return item
+
+
+def icon_button(name: str, tip: str, hover: str = T.TEXT_PRIMARY) -> QToolButton:
+    """A 32px icon-only ghost button; the icon lightens (or turns `hover`) under the mouse."""
+    button = QToolButton(objectName="icon")
+    icon = QIcon(svg_icons.pixmap(name, T.TEXT_SECONDARY, 16))
+    icon.addPixmap(svg_icons.pixmap(name, hover, 16), QIcon.Mode.Active)
+    button.setIcon(icon)
+    button.setIconSize(QSize(16, 16))
+    button.setAutoRaise(True)
+    button.setToolTip(tip)
+    button.setAccessibleName(tip)
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    return button
+
+
+def refresh_button() -> QPushButton:
+    button = QPushButton(svg_icons.icon("refresh", T.TEXT_SECONDARY), " Refresh")
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
+    return button
+
+
+def show_sort(table: QTableWidget, column: int, descending: bool) -> None:
+    """Mark the sorted column: a chevron in the header and its label in TEXT_PRIMARY. The pages
+    sort the rows themselves."""
+    header = table.horizontalHeader()
+    header.setSortIndicatorShown(True)
+    header.setSortIndicator(column, Qt.SortOrder.DescendingOrder if descending else Qt.SortOrder.AscendingOrder)
+    for col in range(table.columnCount()):
+        item = table.horizontalHeaderItem(col)
+        if item is not None:
+            item.setForeground(QColor(T.TEXT_PRIMARY if col == column else T.TEXT_SECONDARY))
+            item.setToolTip("Click to sort")
+
+
+def search_field(example: str) -> QLineEdit:
+    """A search box: leading search icon, a clear (x) button once there's text, up to 640px wide."""
+    field = QLineEdit(placeholderText=example)
+    field.addAction(svg_icons.icon("search", T.TEXT_SECONDARY), QLineEdit.ActionPosition.LeadingPosition)
+    clear = field.addAction(svg_icons.icon("x", T.TEXT_SECONDARY), QLineEdit.ActionPosition.TrailingPosition)
+    clear.setToolTip("Clear")
+    clear.setVisible(False)
+    clear.triggered.connect(lambda: (field.clear(), field.textEdited.emit(""), field.setFocus()))
+    field.textChanged.connect(lambda text: clear.setVisible(bool(text)))
+    field.setMaximumWidth(T.SEARCH_MAX_WIDTH)
+    return field
+
+
+def header_bar(*widgets: QWidget) -> QWidget:
+    """A page's filters and actions for the header line, 8px apart."""
+    bar = QWidget()
+    layout = QHBoxLayout(bar)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(T.SPACE_2)
+    for widget in widgets:
+        layout.addWidget(widget)
+    return bar
+
+
+def form_rows(rows: list[tuple[str, object]]) -> QGridLayout:
+    """Field rows: labels right-aligned in their own column, 8px to the field, rows 8px apart.
+    A row's field may be a widget or a layout."""
+    grid = QGridLayout()
+    grid.setHorizontalSpacing(T.SPACE_2)
+    grid.setVerticalSpacing(T.SPACE_2)
+    for r, (label, field) in enumerate(rows):
+        if label:
+            grid.addWidget(QLabel(label, objectName="muted"), r, 0,
+                           Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        if isinstance(field, QWidget):
+            grid.addWidget(field, r, 1, Qt.AlignmentFlag.AlignLeft)
+        else:
+            grid.addLayout(field, r, 1)
+    grid.setColumnStretch(2, 1)
+    return grid
+
+
+class StatTile(QFrame):
+    """A stat tile: caption, a big value, and a detail line."""
+
+    def __init__(self, caption: str) -> None:
+        super().__init__(objectName="card")
+        self.value = QLabel(objectName="stat")
+        self.detail = QLabel(objectName="status")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(T.SPACE_4, T.SPACE_4, T.SPACE_4, T.SPACE_4)
+        layout.setSpacing(T.SPACE_1)
+        title = QLabel(caption.upper(), objectName="caption")
+        layout.addWidget(title)
+        layout.addWidget(self.value)
+        layout.addWidget(self.detail)
+
+    def set(self, value: str, detail: str, color: str = T.TEXT_PRIMARY) -> None:
+        self.value.setText(value)
+        self.value.setStyleSheet(f"color: {color};")
+        self.detail.setText(detail)
+
+
+def card(heading: str = "") -> tuple[QFrame, QVBoxLayout]:
+    """A panel card (16px padding), with an optional heading 12px above its content."""
+    frame = QFrame(objectName="card")
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(T.SPACE_4, T.SPACE_4, T.SPACE_4, T.SPACE_4)
+    layout.setSpacing(T.SPACE_2)
+    if heading:
+        frame.heading = QLabel(heading, objectName="heading")
+        layout.addWidget(frame.heading)
+        layout.addSpacing(T.SPACE_1)
+    return frame, layout
+
+
+class Notice(QFrame):
+    """An inline notice: a strip with a 2px bar in the tone colour, an icon and one sentence."""
+
+    TONES = {"info": (T.DEFAULT_ACCENT, "info"), "warning": (T.WARNING, "alert"), "error": (T.NEGATIVE, "alert")}
+
+    def __init__(self, tone: str = "info") -> None:
+        super().__init__(objectName="notice")
+        self.tone = ""
+        self.default_tone = tone
+        self.icon = QLabel()
+        self.label = QLabel(wordWrap=True)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(T.SPACE_3, T.SPACE_2, T.SPACE_3, T.SPACE_2)
+        layout.setSpacing(T.SPACE_2)
+        layout.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.label, 1)
+        self.hide()
+
+    def text(self) -> str:
+        return self.label.text() if self.tone else ""
+
+    def setText(self, text: str) -> None:  # noqa: N802 (QLabel naming)
+        self.show_text(text, self.default_tone)
+
+    def show_text(self, text: str, tone: str = "info") -> None:
+        self.tone = tone if text else ""
+        if not text:
+            self.hide()
+            return
+        color, icon = self.TONES[tone]
+        self.setStyleSheet(f"QFrame#notice {{ background: {T.BG_RAISED}; border: none; border-left: 2px solid {color};"
+                           f" border-radius: 4px; }} QFrame#notice QLabel {{ background: transparent; }}")
+        self.icon.setPixmap(svg_icons.pixmap(icon, T.accent_hex() if tone == "info" else color, 16))
+        self.label.setText(text)
+        self.show()
+
+
+class Segmented(QFrame):
+    """A segmented control: 2 to 4 always-visible exclusive options. Reads like a QComboBox
+    (currentIndex, currentData, currentIndexChanged); `buttons` are the segments."""
+
+    currentIndexChanged = pyqtSignal(int)
+
+    def __init__(self, options: list[tuple[str, object]]) -> None:
+        super().__init__(objectName="segmented")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(1, 1, 1, 1)
+        layout.setSpacing(0)
+        self.group = QButtonGroup(self)
+        self.buttons: list[QPushButton] = []
+        self.values = [value for _label, value in options]
+        for i, (label, _value) in enumerate(options):
+            button = QPushButton(label, objectName="segment", checkable=True)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.group.addButton(button, i)
+            self.buttons.append(button)
+            layout.addWidget(button)
+        self.buttons[0].setChecked(True)
+        self.group.idToggled.connect(lambda i, on: self.currentIndexChanged.emit(i) if on else None)
+        self.setFixedHeight(T.CONTROL_HEIGHT)
+
+    def currentIndex(self) -> int:  # noqa: N802 (Qt naming)
+        return self.group.checkedId()
+
+    def setCurrentIndex(self, index: int) -> None:  # noqa: N802 (Qt naming)
+        self.buttons[index].setChecked(True)
+
+    def currentData(self):  # noqa: N802 (Qt naming)
+        return self.values[self.currentIndex()]
 
 
 class Section(QWidget):
@@ -358,7 +759,11 @@ class Section(QWidget):
 
     def add_page(self, key: str, widget: QWidget) -> None:
         if widget.layout() is not None:  # pages line up with the section's own controls
-            widget.layout().setContentsMargins(0, 14, 0, 0)
+            widget.layout().setContentsMargins(0, T.SPACE_4, 0, 0)
+        for part in (getattr(widget, "header_actions", None), getattr(widget, "status_line", None)):
+            if part is not None and part.parent() is None:
+                part.setParent(widget)  # a child until the window docks it, so guard_wheel finds it
+                part.hide()
         self._page_by_key[key] = widget
         self.pages.addWidget(widget)
 

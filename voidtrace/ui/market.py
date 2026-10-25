@@ -17,10 +17,8 @@ from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
-    QHBoxLayout,
     QInputDialog,
     QLabel,
-    QLineEdit,
     QListWidget,
     QPushButton,
     QTableWidgetItem,
@@ -33,7 +31,8 @@ from ..icons import platinum_icon
 from ..items import CatalogItem
 from ..sellers import SellerOrder, SellerService, rank_counts, whisper_text
 from ..search import search_catalog
-from .widgets import STATUS_COLOR, STATUS_LABEL, Section, make_table, set_rows
+from .. import theme as T
+from .widgets import STATUS_COLOR, STATUS_LABEL, Section, header_bar, make_table, search_field, set_rows
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +45,7 @@ def item_title(item: CatalogItem) -> str:
     name = html.escape(item.name)
     if item.max_rank is None:
         return name
-    return f'{name} <span style="color:#8fa3c2; font-size:13px; font-weight:400">max rank {item.max_rank}</span>'
+    return f'{name} <span style="color:{T.TEXT_SECONDARY}; font-size:13px; font-weight:400">max rank {item.max_rank}</span>'
 
 
 class MarketSection(Section):
@@ -67,9 +66,10 @@ class MarketSection(Section):
         self.rows: list[SellerOrder] = []
         self._request = 0
 
-        self.search = QLineEdit(placeholderText="Search an item, e.g. primed continuity")
+        self.search = search_field("e.g. primed continuity")
         self.suggestions = QListWidget()
         self.suggestions.setMaximumHeight(180)
+        self.suggestions.setMaximumWidth(T.SEARCH_MAX_WIDTH)
         self.suggestions.hide()
         self.title = QLabel(objectName="title")
         self.rank = QComboBox()
@@ -83,26 +83,21 @@ class MarketSection(Section):
         self.alert_button = QPushButton("Alert me\u2026")
         self.alert_button.setToolTip("Tell me when someone sells this at or under a price")
         self.alert_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.alert_button.setEnabled(False)  # until an item is picked
         self.alert_button.clicked.connect(self._ask_alert)
         self.table = make_table(COLUMNS)
         self.table.horizontalHeaderItem(3).setIcon(QIcon(platinum_icon(14)))
         self.table.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.status = QLabel(objectName="muted")
+        self.table.state.message("Search an item to see its sellers", "search")
+        self.status = QLabel(objectName="status")
 
         from .orders import MyOrdersPanel, PostOrderPanel  # imported here: it imports this module's types
 
-        controls = QHBoxLayout()
-        controls.addWidget(self.title, 1)
-        controls.addWidget(self.rank)
-        controls.addWidget(self.online)
-        controls.addWidget(self.alert_button)
         buy_tab = QWidget()
+        buy_tab.header_actions = header_bar(self.rank, self.online, self.alert_button)
+        buy_tab.status_line = self.status
         buy_layout = QVBoxLayout(buy_tab)
-        buy_layout.setContentsMargins(0, 8, 0, 0)
-        buy_layout.addLayout(controls)
-        buy_layout.addWidget(QLabel("Click a seller to copy the whisper, then paste it in game chat.", objectName="muted"))
         buy_layout.addWidget(self.table, 1)
-        buy_layout.addWidget(self.status)
 
         self.post_panel = PostOrderPanel(self)
         self.orders_panel = MyOrdersPanel(self)
@@ -117,7 +112,8 @@ class MarketSection(Section):
             self.add_page(key, page)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, T.SPACE_4, 0, 0)
+        layout.setSpacing(T.SPACE_1)
         layout.addWidget(self.search)
         layout.addWidget(self.suggestions)
         layout.addWidget(self.pages, 1)
@@ -172,6 +168,7 @@ class MarketSection(Section):
             self.rank.setCurrentIndex(0 if rank is None else rank + 1)
         self.rank.setVisible(item.max_rank is not None)
         self.rank.blockSignals(False)
+        self.alert_button.setEnabled(True)
         self.post_panel.set_item(rank)
         if self.current_page() not in ("buy", "sell"):
             self.show_page("buy")  # the item is on Buy: from Trades or Alerts the pick looked lost
@@ -185,7 +182,7 @@ class MarketSection(Section):
             return
         self._request += 1
         request, slug, rank, online = self._request, self.item.slug, self.selected_rank(), self.online.isChecked()
-        self.table.setRowCount(0)
+        self.table.state.loading()
         self.status.setText("Loading sellers…")
 
         def work():
@@ -200,6 +197,7 @@ class MarketSection(Section):
     def _on_failed(self, request: int, message: str) -> None:
         if request == self._request:
             self.status.setText("Could not reach Warframe.Market. Try again in a moment.")
+            self.table.state.error(retry=self.refresh)
 
     def _on_sellers(self, request: int, rows: list) -> None:
         if request != self._request:
@@ -208,7 +206,7 @@ class MarketSection(Section):
             self._label_ranks(rank_counts(rows))
         self.rows = rows
         set_rows(self.table, len(rows))
-        dim = QColor(104, 118, 145)
+        dim = QColor(T.TEXT_MUTED)
         for r, s in enumerate(rows):
             cells = [s.ingame_name, STATUS_LABEL.get(s.status, s.status), "" if s.rank is None else str(s.rank),
                      str(s.platinum), str(s.quantity), str(s.reputation)]
@@ -232,7 +230,10 @@ class MarketSection(Section):
             self.table.showColumn(2)
         n_flag = sum(s.suspicious for s in rows)
         self.status.setText(f"{len(rows)} sellers" + (f", {n_flag} with unusual prices (greyed out)" if n_flag else "")
-                            if rows else "Nobody is selling this right now.")
+                            + " · click one to copy the whisper" if rows else "Nobody is selling this right now.")
+        if not rows:
+            self.table.state.message("Nobody's selling this right now", "info", button="Alert me\u2026",
+                                     on_click=self._ask_alert)
 
     def _label_ranks(self, counts: dict) -> None:
         """Show how many sellers each rank has, e.g. "Rank 0 (52)"."""
