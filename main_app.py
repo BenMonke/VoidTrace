@@ -30,9 +30,9 @@ from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from voidtrace.cv_cleaner import TesseractNotFound, capture_screen, warframe_is_foreground
 from voidtrace.debug_log import DebugChannelBusy, DebugLogSource, find_warframe_pid
-from voidtrace import app_support, disclaimer, hotkey, online_status, settings, theme, trade_toast
+from voidtrace import app_support, cv_cleaner, disclaimer, hotkey, online_status, settings, theme, trade_toast
 from voidtrace.icons import voidtrace_logo
-from voidtrace.items import load_catalog, load_items
+from voidtrace.items import default_cache_dir, load_catalog, load_items
 from voidtrace.ui.market import MarketSection
 from voidtrace.rivens import RivenService, load_riven_catalog
 from voidtrace.sellers import SellerService
@@ -147,7 +147,7 @@ def app_icon() -> QIcon:
 
 
 def make_tray(app: QApplication, open_window, game_log_status=lambda: None, toggle_riven_popup=None,
-              toggle_trade_updates=None, toggle_online_status=None) -> QSystemTrayIcon:
+              toggle_trade_updates=None, toggle_online_status=None, add_shortcuts=None) -> QSystemTrayIcon:
     """The tray icon: click it to open VoidTrace; right-click for the toggles and the rest."""
     from voidtrace.ui.main_window import accent_menu
 
@@ -166,9 +166,12 @@ def make_tray(app: QApplication, open_window, game_log_status=lambda: None, togg
             action.setChecked(on)
             action.toggled.connect(toggle)
     menu.addMenu(accent_menu(menu))
+    if add_shortcuts is not None:
+        menu.addAction("Add Desktop and Start menu shortcuts", add_shortcuts)
     menu.addSeparator()
     menu.addAction("Run self-test", lambda: show_self_test(game_log_status()))
     menu.addAction("Open log folder", lambda: _open_folder(app_support.log_path().parent))
+    menu.addAction("Export OCR samples (to help improve reading)", export_ocr_samples)
     menu.addAction("Disclaimer (use at your own risk)", lambda: show_disclaimer(first_run=False))
     menu.addSeparator()
     menu.addAction("Quit VoidTrace", app.quit)
@@ -201,6 +204,24 @@ def _open_folder(path: Path) -> None:
     import os
 
     os.startfile(str(path))  # noqa: S606 - opens Explorer on our own log folder
+
+
+def export_ocr_samples() -> None:
+    """Zip the saved OCR samples into one file a player can send, and show it in Explorer."""
+    import subprocess
+    import zipfile
+
+    folder = cv_cleaner.KEEP_CAPTURES_DIR
+    files = sorted(folder.glob("*.png")) + sorted(folder.glob("*.json")) if folder and folder.is_dir() else []
+    if not files:
+        QMessageBox.information(None, "VoidTrace", "No OCR samples yet. VoidTrace saves one each time it reads "
+                                "relic rewards or a riven.")
+        return
+    zip_path = folder.parent / "VoidTrace OCR samples.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in files:
+            z.write(f, f.name)
+    subprocess.Popen(["explorer", f"/select,{zip_path}"])  # noqa: S603,S607 - shows our own file
 
 
 def show_self_test(game_log_status: Optional[str] = None) -> bool:
@@ -243,6 +264,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     log_file = app_support.setup_logging(args.verbose)
     log.info("VoidTrace starting (log: %s)", log_file)
+    # OCR samples (only the reward names / riven card, never the whole screen) for tools/ocr_check.py
+    cv_cleaner.KEEP_CAPTURES_DIR = (default_cache_dir() if getattr(sys, "frozen", False)
+                                    else Path(__file__).resolve().parent) / "captures"
 
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
@@ -381,10 +405,24 @@ def main(argv: Optional[list[str]] = None) -> int:
         return ("FAIL: using the slower log file: another program (WFInfo, Overwolf, DebugView) "
                 "was reading the game's log when VoidTrace started")
 
-    tray = make_tray(app, window.open_page, game_log_status, toggle_riven_popup, toggle_trade_updates, toggle_online_status)
+    exe = Path(sys.executable) if getattr(sys, "frozen", False) else None  # shortcuts only for the packaged app
+
+    def add_shortcuts() -> None:
+        done = app_support.create_shortcuts(exe)
+        tray.showMessage("VoidTrace", "Shortcuts added: on your Desktop and in the Start menu." if done else
+                         "Could not add the shortcuts (see the log folder).", app_icon(), 5000)
+
+    tray = make_tray(app, window.open_page, game_log_status, toggle_riven_popup, toggle_trade_updates, toggle_online_status,
+                     add_shortcuts if exe else None)
     status_keeper.changed.connect(lambda text: tray.setToolTip(f"VoidTrace\n{text}"))
     status_keeper.start()
     riven_watcher.start()
+    if exe and not settings.get("shortcut_asked"):
+        settings.put("shortcut_asked", True)
+        answer = QMessageBox.question(None, "VoidTrace", "Put a VoidTrace shortcut on your Desktop and in the Start "
+                                      "menu?\n\nYou can also add them later from the tray icon menu.")
+        if answer == QMessageBox.StandardButton.Yes:
+            add_shortcuts()
     if first_launch:
         window.open_page("market/buy")  # a new user sees the app, not just an icon in the tray
     tray.showMessage("VoidTrace is running",

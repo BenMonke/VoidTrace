@@ -72,6 +72,14 @@ POLARITY = {"sobek_satidra": "madurai", "burston_sati-visicon": "naramon", "hiko
             "burston_sati-visicon_cycle_prime": "naramon"}
 
 
+# Cards added with tools/ocr_check.py carry their truth in screens.json.
+for _key, _meta in json.loads((SCREENS / "screens.json").read_text()).items():
+    if "truth" in _meta:
+        _t = _meta["truth"]
+        EXPECTED[_key] = (_t["weapon"], _t["name"], _t["mr"], _t["rolls"], _t["rank"], [tuple(a) for a in _t["attrs"]])
+        POLARITY[_key] = _t["polarity"]
+
+
 @pytest.fixture(scope="module")
 def catalog():
     return rivens.RivenCatalog(rivens.parse_weapons(json.loads((FIXTURES / "weapons.json").read_text())["data"]),

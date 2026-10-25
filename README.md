@@ -15,10 +15,11 @@ are worth opening.
 
 ## Install (3 steps, Windows)
 
-1. Download `VoidTrace-<version>-windows.zip` from **[Releases](https://github.com/Ben250210/VoidTrace/releases/latest)**.
+1. Download **`VoidTrace-<version>-windows.zip`** from **[Releases](https://github.com/BenMonke/VoidTrace/releases/latest)**
+   (under Assets; not "Source code", which has no exe).
 2. Right-click it > **Extract All**, anywhere (for example your Desktop).
 3. Open the `VoidTrace` folder and double-click **VoidTrace.exe**. A blue crystal appears in the
-   system tray (bottom right).
+   system tray (bottom right), and the first time it offers a Desktop and Start menu shortcut.
    - If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**.
      The app is not code-signed; the source is all here.
 

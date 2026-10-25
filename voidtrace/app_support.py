@@ -1,5 +1,6 @@
 """Things the packaged app needs that a developer run doesn't: a log file, one running copy,
-and a self-test a player can run (and send back) when something does not work."""
+Desktop and Start menu shortcuts, and a self-test a player can run (and send back) when something
+does not work."""
 
 from __future__ import annotations
 
@@ -56,6 +57,35 @@ def acquire_single_instance():
     lock = QLockFile(str(path))
     lock.setStaleLockTime(0)  # a lock left by a crashed copy is detected by its dead process id
     return lock if lock.tryLock(200) else None
+
+
+def create_shortcuts(exe: Path, run: Callable = None) -> bool:
+    """Put a "VoidTrace" shortcut to `exe` on the Desktop and in the Start menu (so typing VoidTrace in
+    Start finds it). Windows' own shortcut maker (WScript.Shell) through PowerShell: no extra library.
+    The folders come from Windows, so a Desktop moved to OneDrive works too."""
+    import subprocess
+
+    exe_q = str(exe).replace("'", "''")  # PowerShell single-quoted string
+    dir_q = str(exe.parent).replace("'", "''")
+    script = (
+        "$shell = New-Object -ComObject WScript.Shell; "
+        "foreach ($folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) { "
+        "$link = $shell.CreateShortcut((Join-Path $folder 'VoidTrace.lnk')); "
+        f"$link.TargetPath = '{exe_q}'; $link.WorkingDirectory = '{dir_q}'; $link.IconLocation = '{exe_q}'; "
+        "$link.Description = 'VoidTrace: Warframe prices, rivens and relics'; $link.Save() }"
+    )
+    run = run or subprocess.run
+    try:
+        result = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                     capture_output=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception as exc:
+        log.warning("could not create shortcuts: %s", exc)
+        return False
+    if result.returncode != 0:
+        log.warning("could not create shortcuts (PowerShell exit %s)", result.returncode)
+        return False
+    log.info("Desktop and Start menu shortcuts created for %s", exe)
+    return True
 
 
 # --- self-test --------------------------------------------------------------------------------

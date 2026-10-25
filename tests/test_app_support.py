@@ -74,3 +74,27 @@ def test_bundled_tesseract_is_found_next_to_the_exe(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "executable", str(exe))
     monkeypatch.delenv("TESSERACT_CMD", raising=False)
     assert cv_cleaner.find_tesseract() == str(tmp_path / "tesseract" / "tesseract.exe")
+
+
+def test_create_shortcuts_asks_windows_for_desktop_and_start_menu():
+    from pathlib import Path
+
+    from voidtrace.app_support import create_shortcuts
+
+    calls = []
+    exe = Path(r"C:\Users\O'Neil\Games\VoidTrace\VoidTrace.exe")
+    assert create_shortcuts(exe, run=lambda cmd, **kw: calls.append(cmd) or type("R", (), {"returncode": 0})())
+    (cmd,) = calls
+    script = cmd[-1]
+    assert cmd[0].lower().startswith("powershell")
+    assert "GetFolderPath('Desktop')" in script and "GetFolderPath('Programs')" in script
+    assert r"C:\Users\O''Neil\Games\VoidTrace\VoidTrace.exe" in script  # quote doubled for PowerShell
+    assert "VoidTrace.lnk" in script
+
+
+def test_create_shortcuts_reports_failure():
+    from pathlib import Path
+
+    from voidtrace.app_support import create_shortcuts
+
+    assert not create_shortcuts(Path("x.exe"), run=lambda cmd, **kw: type("R", (), {"returncode": 1})())
