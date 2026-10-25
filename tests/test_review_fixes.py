@@ -208,19 +208,25 @@ def test_relic_status_line_without_missing_prices(qapp):
     section.shutdown()
 
 
-# --- 8: sidebar: arrow keys open pages, headers do not collapse ---------------------------------------
+# --- 8: keyboard: arrow keys move between page tabs and rail sections ------------------------------
 
-def test_sidebar_arrow_keys_open_the_page(qapp):
+def test_tab_arrow_keys_open_the_page(qapp):
     window, _ = make_window(last="market/buy")
-    window.sidebar.setFocus()
-    QTest.keyClick(window.sidebar, Qt.Key.Key_Down)
+    tab = window.tabs["market/buy"]
+    tab.setFocus()
+    QTest.keyClick(tab, Qt.Key.Key_Right)
     assert window.current_page() == "market/sell"
+    QTest.keyClick(window.tabs["market/sell"], Qt.Key.Key_Left)
+    assert window.current_page() == "market/buy"
     window.hide()
 
 
-def test_sidebar_headers_do_not_collapse(qapp):
-    window, _ = make_window()
-    assert not window.sidebar.itemsExpandable()
+def test_rail_arrow_keys_open_the_next_section(qapp):
+    window, _ = make_window(last="market/buy")
+    QTest.keyClick(window.tiles["market"], Qt.Key.Key_Down)
+    assert window.current_page().startswith("rivens/")
+    QTest.keyClick(window.tiles["rivens"], Qt.Key.Key_Down)
+    assert window.current_page().startswith("relics/")
 
 
 # --- 10: searching from another Market page shows the item ---------------------------------------------

@@ -31,9 +31,9 @@ TOAST_STYLE = """
 QWidget#toast { background: #0b1220; border: 1px solid #4fa3ff; border-radius: 8px; }
 QLabel { color: #dbe6ff; background: transparent; }
 QLabel#title { color: #4fa3ff; font-weight: 600; }
-QPushButton { background: #4fa3ff; color: #06101f; border: none; border-radius: 4px; padding: 5px 14px;
+QPushButton { background: #4fa3ff; color: #0b0d10; border: none; border-radius: 4px; padding: 5px 14px;
               font-weight: 600; }
-QPushButton:hover { background: #74b8ff; }
+QPushButton:hover { background: #6eb3ff; }
 """
 
 

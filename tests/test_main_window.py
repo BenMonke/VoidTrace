@@ -81,13 +81,14 @@ def settle(qapp, condition, timeout=3.0):
     return condition()
 
 
-def test_sidebar_lists_every_page_in_order(qapp):
+def test_tabs_list_every_page_in_order(qapp):
     window, _ = make_window()
-    assert window.sidebar_labels() == LABELS
-    assert window.sidebar_keys() == KEYS
+    assert window.tab_labels() == LABELS
+    assert window.tab_keys() == KEYS
+    assert list(window.tiles) == ["market", "rivens", "relics"]
 
 
-def test_real_riven_section_has_the_sidebar_pages():
+def test_real_riven_section_has_the_tab_pages():
     from voidtrace.ui.main_window import RIVEN_PAGES
     from voidtrace.ui.rivens import RivenSection
 
@@ -156,15 +157,20 @@ def test_account_button_updates_both_sections(qapp):
     window, account = make_window()
     window.show_page("rivens/mine")
     assert settle(qapp, lambda: window.rivens() is not None)
-    assert window.account_button.text().endswith("Sign in to Warframe.Market")
+    menu = lambda: [a.text() for a in window.account_menu.actions() if a.text()]  # noqa: E731
+    assert window.account_button.toolTip() == "Sign in to Warframe.Market"
+    assert "Sign in to Warframe.Market" in menu()
     before = window.rivens().refreshed
     account.signed_in, account.ingame_name = True, "Tenno"
     window.market.account_changed()  # what the sign-in dialog does when it succeeds
-    assert window.account_button.text().endswith("Tenno · Sign out")
+    assert window.account_button.initial == "T"
+    assert window.account_button.toolTip().startswith("Tenno · ")
     assert window.rivens().refreshed == before + 1
-    window.account_button.click()  # signs out
+    sign_out = next(a for a in window.account_menu.actions() if a.text() == "Sign out")
+    sign_out.trigger()
     assert not account.signed_in
-    assert window.account_button.text().endswith("Sign in to Warframe.Market")
+    assert window.account_button.initial == ""
+    assert "Sign in to Warframe.Market" in menu()
 
 
 def test_with_rivens_waits_for_the_section(qapp):
@@ -184,9 +190,56 @@ def test_with_rivens_waits_for_the_section(qapp):
     assert len(got) == 2
 
 
-def test_section_switching_itself_moves_the_sidebar(qapp):
+def test_section_switching_itself_moves_the_tabs(qapp):
     window, _ = make_window()
     window.show_page("relics/unvaulted")
     window.relics.show_relic("Axi A1 Relic")  # double-click in a table opens Look up
     assert window.current_page() == "relics/lookup"
-    assert window.sidebar.currentItem().text(0) == "Look up"
+    assert window.tabs["relics/lookup"].isChecked()
+    assert window.tiles["relics"].isChecked()
+
+
+def test_rail_tile_reopens_the_last_tab_of_its_section(qapp):
+    window, _ = make_window()
+    window.show_page("relics/vaulted")
+    window.show_page("market/trades")
+    window.tiles["relics"].click()
+    assert window.current_page() == "relics/vaulted"
+    window.tiles["market"].click()
+    assert window.current_page() == "market/trades"
+    again, _ = make_window()  # remembered across restarts
+    again.tiles["relics"].click()
+    assert again.current_page() == "relics/vaulted"
+
+
+def test_ingame_status_toggle_is_one_setting(qapp):
+    from voidtrace import online_status
+
+    window, account = make_window()
+    account.signed_in, account.ingame_name = True, "Tenno"
+    window.refresh_account_button()
+    assert window.ingame_action in window.account_menu.actions()
+    window.ingame_action.setChecked(True)
+    assert online_status.enabled()
+    window.ingame_action.setChecked(False)
+    assert not online_status.enabled()
+
+
+def test_avatar_dot_follows_the_status_keeper(qapp):
+    from PyQt6.QtCore import QObject, pyqtSignal
+
+    class Keeper(QObject):
+        changed = pyqtSignal(str)
+        shown = None
+
+        def tick(self):
+            pass
+
+    window, account = make_window()
+    account.signed_in, account.ingame_name = True, "Tenno"
+    keeper = Keeper()
+    window.set_status_keeper(keeper)
+    keeper.shown = "ingame"
+    keeper.changed.emit("Warframe.Market status: In game")
+    assert window.account_button.status == "ingame"
+    assert "In game" in window.account_button.toolTip()

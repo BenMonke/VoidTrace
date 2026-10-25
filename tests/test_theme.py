@@ -33,8 +33,8 @@ def test_default_accent_is_the_logo_blue():
 
 def test_a_chosen_accent_replaces_the_default_everywhere():
     theme.set_accent("#ff6b6b")
-    css = theme.apply("a { color: #4fa3ff; } a:hover { color: #74b8ff; } b { color: #06101f; }")
-    assert "#4fa3ff" not in css and "#74b8ff" not in css
+    css = theme.apply("a { color: #4fa3ff; } a:hover { color: #6eb3ff; } b { color: #0b0d10; }")
+    assert "#4fa3ff" not in css and "#6eb3ff" not in css
     assert "#ff6b6b" in css and theme.hover_hex() in css
 
 
@@ -64,3 +64,9 @@ def test_disclaimer_says_no_responsibility_for_bans():
     text = disclaimer.SHORT.lower()
     assert "own risk" in text and "ban" in text and "no warranty" in text
     assert "not made, endorsed or supported by digital extremes" in text
+
+
+def test_default_shades_match_the_literals_stylesheets_use():
+    # apply() finds these literals by text, so they must be exactly what the default accent derives
+    assert (theme.hover_hex(), theme.pressed_hex(), theme.soft_hex(), theme.on_accent_hex()) == (
+        theme.DEFAULT_HOVER, theme.DEFAULT_PRESSED, theme.DEFAULT_SOFT, theme.DEFAULT_ON_ACCENT)

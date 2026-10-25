@@ -147,7 +147,7 @@ def app_icon() -> QIcon:
 
 
 def make_tray(app: QApplication, open_window, game_log_status=lambda: None, toggle_riven_popup=None,
-              toggle_trade_updates=None, toggle_online_status=None, add_shortcuts=None) -> QSystemTrayIcon:
+              toggle_trade_updates=None, status_action=None, add_shortcuts=None) -> QSystemTrayIcon:
     """The tray icon: click it to open VoidTrace; right-click for the toggles and the rest."""
     from voidtrace.ui.main_window import accent_menu
 
@@ -157,14 +157,14 @@ def make_tray(app: QApplication, open_window, game_log_status=lambda: None, togg
     menu.addAction("Open VoidTrace", open_window)
     menu.addSeparator()
     for label, toggle, on in (("Riven popup in Cycle / Item Details", toggle_riven_popup, True),
-                              ("Update orders after trades", toggle_trade_updates, trade_toast.enabled()),
-                              ("Show me in game on Warframe.Market while playing", toggle_online_status,
-                               online_status.enabled())):
+                              ("Update orders after trades", toggle_trade_updates, trade_toast.enabled())):
         if toggle is not None:
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(on)
             action.toggled.connect(toggle)
+    if status_action is not None:  # the same action as the account menu's, so both stay in step
+        menu.addAction(status_action)
     menu.addMenu(accent_menu(menu))
     if add_shortcuts is not None:
         menu.addAction("Add Desktop and Start menu shortcuts", add_shortcuts)
@@ -388,10 +388,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         lambda: market.account.token if market.account.signed_in else None,
         lambda: find_warframe_pid() is not None)
 
-    def toggle_online_status(on: bool) -> None:
-        settings.put(online_status.SETTING, on)
-        log.info("in-game status on Warframe.Market %s", "on" if on else "off")
-        status_keeper.tick()
+    window.set_status_keeper(status_keeper)
 
     def toggle_trade_updates(on: bool) -> None:
         settings.put(trade_toast.SETTING, on)
@@ -412,7 +409,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         tray.showMessage("VoidTrace", "Shortcuts added: on your Desktop and in the Start menu." if done else
                          "Could not add the shortcuts (see the log folder).", app_icon(), 5000)
 
-    tray = make_tray(app, window.open_page, game_log_status, toggle_riven_popup, toggle_trade_updates, toggle_online_status,
+    tray = make_tray(app, window.open_page, game_log_status, toggle_riven_popup, toggle_trade_updates, window.ingame_action,
                      add_shortcuts if exe else None)
     status_keeper.changed.connect(lambda text: tray.setToolTip(f"VoidTrace\n{text}"))
     status_keeper.start()
