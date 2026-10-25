@@ -282,7 +282,7 @@ class RivenAssistant(QObject):
     def card_shown(self, frame, _layout=None) -> None:
         self._generation += 1
         generation = self._generation
-        keep_capture(frame, "riven")
+        keep_capture(frame, "riven", _layout)
         if self.popup.draft is None or not self.popup.isVisible():
             self.popup.show_reading()  # a re-read of a showing riven happens quietly behind it
 

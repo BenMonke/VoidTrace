@@ -8,6 +8,7 @@ keep the UI in a centered 16:9 area, so scaling is driven by height when the asp
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -288,27 +289,73 @@ def capture_screen(monitor: int = 1, centre: Optional[tuple[float, float]] = Non
     return frame
 
 
-KEEP_CAPTURES_DIR: Optional[Path] = None  # set by the app when run from source: OCR test material
+KEEP_CAPTURES_DIR: Optional[Path] = None  # set by the app: where OCR samples go (tools/ocr_check.py add)
 KEEP_CAPTURES_MAX = 200
+CARD_MARGIN = 8
 
 
-def keep_capture(frame: np.ndarray, kind: str) -> None:
-    """Save a frame the OCR is about to read, for tools/ocr_check.py add. No-op unless enabled."""
+def sample_parts(frame: np.ndarray, kind: str, layout=None) -> Optional[tuple[dict, dict[str, np.ndarray]]]:
+    """Only the parts of a frame the OCR reads (no player names), as (meta, {suffix: image}).
+    meta holds the screen size and where each part sat, so sample_frame() can put them back."""
+    h, w = frame.shape[:2]
+    meta = {"kind": kind, "screen": [w, h]}
+    if kind == "relic":
+        # shortcut: assumes 100% in-game UI scale, like the test fixtures; store the scale if that matters.
+        band = reward_band(w, h)
+        return {**meta, "offset": [band.x, band.y]}, {"": crop(frame, band)}
+    from .riven_ocr import ref_box
+    from .riven_watch import detect_card
+
+    layout = layout or detect_card(frame)
+    if layout is None:
+        return None
+    boxes = [ref_box(frame, b) for b in (layout.text, layout.bar, layout.drain, layout.polarity, layout.cost) if b]
+    x0, y0 = max(0, min(b.x for b in boxes) - CARD_MARGIN), max(0, min(b.y for b in boxes) - CARD_MARGIN)
+    x1, y1 = max(b.x + b.w for b in boxes) + CARD_MARGIN, max(b.y + b.h for b in boxes) + CARD_MARGIN
+    parts = {"": crop(frame, Box(x0, y0, x1 - x0, y1 - y0))}
+    meta["offset"] = [x0, y0]
+    if layout.fits:  # the Cycle screen's "FITS IN" name sits far from the card: its own crop
+        f = ref_box(frame, layout.fits)
+        parts["_fits"] = crop(frame, f)
+        meta["fits_offset"] = [f.x, f.y]
+    return meta, parts
+
+
+def sample_frame(meta: dict, parts: dict[str, np.ndarray]) -> np.ndarray:
+    """A blank frame of the original screen size with the sample's parts back in place."""
+    w, h = meta["screen"]
+    frame = np.zeros((h, w, 3), np.uint8)
+    for suffix, key in (("", "offset"), ("_fits", "fits_offset")):
+        if suffix in parts:
+            img, (x, y) = parts[suffix], meta[key]
+            frame[y:y + img.shape[0], x:x + img.shape[1]] = img
+    return frame
+
+
+def keep_capture(frame: np.ndarray, kind: str, layout=None) -> None:
+    """Save what the OCR is about to read as a sample, for tools/ocr_check.py add. No-op unless enabled."""
     folder = KEEP_CAPTURES_DIR
     if folder is None:
         return
 
     def save():
         try:
+            sample = sample_parts(frame, kind, layout)
+            if sample is None:
+                return
+            meta, parts = sample
             folder.mkdir(parents=True, exist_ok=True)
-            stamp = time.strftime("%Y-%m-%d_%H%M%S")
-            cv2.imwrite(str(folder / f"{stamp}_{kind}.png"), frame)
-            for old in sorted(folder.glob("*.png"))[:-KEEP_CAPTURES_MAX]:  # oldest first: bounded disk use
-                old.unlink()
-        except OSError:
-            pass  # test material only: never let it break a read
+            stem = f"{time.strftime('%Y-%m-%d_%H%M%S')}_{kind}"
+            for suffix, img in parts.items():
+                cv2.imwrite(str(folder / f"{stem}{suffix}.png"), img)
+            (folder / f"{stem}.json").write_text(json.dumps(meta), encoding="utf-8")  # last: marks it complete
+            for old in sorted(folder.glob("*.json"))[:-KEEP_CAPTURES_MAX]:  # oldest first: bounded disk use
+                for f in folder.glob(f"{old.stem}*"):
+                    f.unlink()
+        except Exception:  # test material only: never let it break a read
+            pass
 
-    threading.Thread(target=save, daemon=True).start()  # a 2560x1600 PNG takes ~0.1 s: off the read path
+    threading.Thread(target=save, daemon=True).start()  # off the read path
 
 
 def read_reward_texts(

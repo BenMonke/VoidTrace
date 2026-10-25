@@ -1,12 +1,13 @@
 """OCR accuracy on real screenshots, and an easy way to add more.
 
-    python tools/ocr_check.py                 # score every saved screenshot
-    python tools/ocr_check.py add             # add what the app captured (captures/, when run from source)
-    python tools/ocr_check.py add a.png b.png # or add your own full-screen screenshots
+    python tools/ocr_check.py                   # score every saved screenshot
+    python tools/ocr_check.py add               # add the samples the app saved (captures/, run from source)
+    python tools/ocr_check.py add friend.zip    # a friend's "Export OCR samples" zip (tray menu)
+    python tools/ocr_check.py add a.png folder  # or full-screen screenshots, or folders of either
 
 Adding shows what the OCR read; press Enter if it is right or type the fix. Only the reward-name
 band or the riven card is kept (no player names), next to the fixtures the tests already use, so
-pytest checks the new screenshots too.
+pytest checks the new samples too.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,9 +25,9 @@ sys.path.insert(0, str(ROOT / "tests"))  # reuse the tests' own readers, so the 
 import cv2
 
 from voidtrace import rivens
-from voidtrace.cv_cleaner import Box, crop, find_tesseract, read_reward_texts, reward_band
+from voidtrace.cv_cleaner import find_tesseract, read_reward_texts, sample_frame, sample_parts
 from voidtrace.items import Item, load_items
-from voidtrace.riven_ocr import read_riven, ref_box
+from voidtrace.riven_ocr import read_riven
 from voidtrace.riven_watch import detect_card
 from voidtrace.rivens import RivenAttr
 from voidtrace.text_cleaner import EntityResolver
@@ -36,8 +38,7 @@ import test_riven_ocr as riven_t
 RELIC_ITEMS = relic_t.FIXTURES / "relic_rewards_2026-10-10.json"
 RELIC_TRUTH = relic_t.BANDS / "truth.json"
 RIVEN_META = riven_t.SCREENS / "screens.json"
-CAPTURES = ROOT / "captures"  # where the app saves what it OCRs (cv_cleaner.keep_capture)
-MARGIN = 8
+CAPTURES = ROOT / "captures"  # where the app saves its OCR samples when run from source
 
 
 def load_json(path: Path):
@@ -100,28 +101,49 @@ def new_key(name: str, taken) -> str:
     return key
 
 
-def add_relic(path: Path, frame) -> None:
-    h, w = frame.shape[:2]
+def load_sample(png: Path):
+    """(meta, parts) from an app sample (png + json) or a full-screen screenshot; None if unusable."""
+    meta_path = png.with_suffix(".json")
+    if meta_path.exists():
+        meta = load_json(meta_path)
+        parts = {"": cv2.imread(str(png))}
+        fits = png.with_name(f"{png.stem}_fits.png")
+        if fits.exists():
+            parts["_fits"] = cv2.imread(str(fits))
+        return (meta, parts) if parts[""] is not None else None
+    frame = cv2.imread(str(png))
+    if frame is None:
+        return None
+    return sample_parts(frame, "riven" if detect_card(frame) is not None else "relic")
+
+
+def save_parts(folder: Path, key: str, parts) -> None:
+    for suffix, img in parts.items():
+        cv2.imwrite(str(folder / f"{key}{suffix}.png"), img)
+
+
+def add_relic(source: Path, meta, parts) -> bool:
     items = load_items()  # every possible reward (cached by the app), not just the fixture's list
     by_name = {i.name.lower(): i for i in items}
-    texts = read_reward_texts(frame)
+    texts = read_reward_texts(sample_frame(meta, parts))
     if not texts:
         print("  no reward names found, skipped")
-        return
+        return False
     truth = []
     for i, res in enumerate(EntityResolver(items).resolve_all(texts), 1):
         while True:
-            name = ask(f"  reward {i}", res.item.name if res.item else "?")
+            name = ask(f"  reward {i} (s = skip shot)", res.item.name if res.item else "?")
+            if name.lower() == "s":
+                return False
             if name.lower() in by_name:
                 truth.append(by_name[name.lower()].name)
                 break
             print("    not a known relic reward, try again")
 
     manifest = load_json(RELIC_TRUTH)
-    key = new_key(path.stem, manifest)
-    band = reward_band(w, h)
-    cv2.imwrite(str(relic_t.BANDS / f"{key}.png"), crop(frame, band))
-    manifest[key] = {"screen": [w, h], "truth": truth, "source": path.name}
+    key = new_key(source.stem, manifest)
+    save_parts(relic_t.BANDS, key, parts)
+    manifest[key] = {"screen": meta["screen"], "truth": truth, "source": source.name}
     save_json(RELIC_TRUTH, manifest, 2)
 
     fixture = load_json(RELIC_ITEMS)  # the test resolver only knows these names
@@ -133,17 +155,17 @@ def add_relic(path: Path, frame) -> None:
             known.add(name)
     save_json(RELIC_ITEMS, fixture, 0)
     print(f"  saved as {key}")
+    return True
 
 
-def add_riven(path: Path, frame, layout) -> None:
-    h, w = frame.shape[:2]
-    d = read_riven(frame, riven_catalog()).draft
+def add_riven(source: Path, meta, parts) -> bool:
+    d = read_riven(sample_frame(meta, parts), riven_catalog()).draft
     print(f"  read: {d.weapon} {d.name}  MR {d.mr}  rolls {d.rolls}  rank {d.rank}  {d.polarity}")
     for a in d.attrs:
         print(f"        {a.slug} {a.value} {'buff' if a.positive else 'curse'}")
     answer = input("  Correct? Enter = yes, e = edit, s = skip: ").strip().lower()
     if answer == "s":
-        return
+        return False
     truth = {"weapon": d.weapon, "name": d.name, "mr": d.mr, "rolls": d.rolls, "rank": d.rank,
              "polarity": d.polarity, "attrs": [[a.slug, a.value, a.positive] for a in d.attrs]}
     # shortcut: fields can be edited but stat lines can't be added; skip the shot if one was missed.
@@ -154,44 +176,51 @@ def add_riven(path: Path, frame, layout) -> None:
             a[0] = ask("  stat", a[0])
             a[1] = ask(f"  {a[0]} value", a[1])
 
-    meta = load_json(RIVEN_META)
-    key = new_key(f"{d.weapon}_{d.name}" if d.weapon else path.stem, meta)
-    boxes = [ref_box(frame, b) for b in (layout.text, layout.bar, layout.drain, layout.polarity, layout.cost) if b]
-    x0, y0 = min(b.x for b in boxes) - MARGIN, min(b.y for b in boxes) - MARGIN
-    x1 = max(b.x + b.w for b in boxes) + MARGIN
-    y1 = max(b.y + b.h for b in boxes) + MARGIN
-    cv2.imwrite(str(riven_t.SCREENS / f"{key}.png"), crop(frame, Box(x0, y0, x1 - x0, y1 - y0)))
-    entry = {"screen": [w, h], "offset": [max(0, x0), max(0, y0)], "source": path.name, "truth": truth}
-    if layout.fits:  # the Cycle screen's "FITS IN" name sits far from the card: kept as its own crop
-        f = ref_box(frame, layout.fits)
-        cv2.imwrite(str(riven_t.SCREENS / f"{key}_fits.png"), crop(frame, f))
-        entry["fits_offset"] = [f.x, f.y]
-    meta[key] = entry
-    save_json(RIVEN_META, meta, 1)
+    screens = load_json(RIVEN_META)
+    key = new_key(f"{truth['weapon']}_{truth['name']}" if truth["weapon"] else source.stem, screens)
+    save_parts(riven_t.SCREENS, key, parts)
+    screens[key] = {k: meta[k] for k in ("screen", "offset", "fits_offset") if k in meta}
+    screens[key].update(source=source.name, truth=truth)
+    save_json(RIVEN_META, screens, 1)
     print(f"  saved as {key}")
+    return True
+
+
+def expand(paths: list[str]) -> list[Path]:
+    """Every png to look at: folders searched, zips unpacked next to captures/."""
+    found = []
+    for p in map(Path, paths):
+        if p.suffix.lower() == ".zip":
+            out = CAPTURES / "imported" / p.stem
+            with zipfile.ZipFile(p) as z:  # extractall drops absolute paths and ".." parts
+                z.extractall(out)
+            p = out
+        found += sorted(p.rglob("*.png")) if p.is_dir() else [p]
+    return [f for f in found if not f.stem.endswith("_fits")]  # read together with its card
 
 
 def add(paths: list[str]) -> None:
     from_captures = not paths
-    files = [Path(p) for p in paths] or sorted(CAPTURES.glob("*.png"))
+    files = expand(paths) if paths else [f for f in sorted(CAPTURES.glob("*.png")) if not f.stem.endswith("_fits")]
     if not files:
-        print(f"No screenshots given and none in {CAPTURES} (the app saves them there when run from source).")
+        print("No .png samples found there." if paths else
+              f"Nothing in {CAPTURES} yet (the app saves samples there when run from source).")
         return
+    added = 0
     for p in files:
-        frame = cv2.imread(str(p))
-        if frame is None:
-            print(f"{p}: not an image, skipped")
-            continue
         print(p.name)
-        layout = detect_card(frame)
-        if layout is not None:
-            add_riven(p, frame, layout)
+        sample = load_sample(p)
+        if sample is None:
+            print("  not a relic reward screen or riven card, skipped")
         else:
-            add_relic(p, frame)
+            meta, parts = sample
+            added += (add_riven if meta["kind"] == "riven" else add_relic)(p, meta, parts)
         if from_captures:  # looked at: moved aside (not deleted) so the next run only shows new ones
             (CAPTURES / "done").mkdir(exist_ok=True)
-            p.replace(CAPTURES / "done" / p.name)
-    print("\nRe-run without 'add' to see the new score.")
+            for f in CAPTURES.glob(f"{p.stem}*"):
+                if f.is_file():
+                    f.replace(CAPTURES / "done" / f.name)
+    print(f"\nAdded {added} of {len(files)}. Re-run without 'add' to see the new score.")
 
 
 if __name__ == "__main__":

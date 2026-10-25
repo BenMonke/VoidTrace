@@ -32,7 +32,7 @@ from voidtrace.cv_cleaner import TesseractNotFound, capture_screen, warframe_is_
 from voidtrace.debug_log import DebugChannelBusy, DebugLogSource, find_warframe_pid
 from voidtrace import app_support, cv_cleaner, disclaimer, hotkey, online_status, settings, theme, trade_toast
 from voidtrace.icons import voidtrace_logo
-from voidtrace.items import load_catalog, load_items
+from voidtrace.items import default_cache_dir, load_catalog, load_items
 from voidtrace.ui.market import MarketSection
 from voidtrace.rivens import RivenService, load_riven_catalog
 from voidtrace.sellers import SellerService
@@ -171,6 +171,7 @@ def make_tray(app: QApplication, open_window, game_log_status=lambda: None, togg
     menu.addSeparator()
     menu.addAction("Run self-test", lambda: show_self_test(game_log_status()))
     menu.addAction("Open log folder", lambda: _open_folder(app_support.log_path().parent))
+    menu.addAction("Export OCR samples (to help improve reading)", export_ocr_samples)
     menu.addAction("Disclaimer (use at your own risk)", lambda: show_disclaimer(first_run=False))
     menu.addSeparator()
     menu.addAction("Quit VoidTrace", app.quit)
@@ -203,6 +204,24 @@ def _open_folder(path: Path) -> None:
     import os
 
     os.startfile(str(path))  # noqa: S606 - opens Explorer on our own log folder
+
+
+def export_ocr_samples() -> None:
+    """Zip the saved OCR samples into one file a player can send, and show it in Explorer."""
+    import subprocess
+    import zipfile
+
+    folder = cv_cleaner.KEEP_CAPTURES_DIR
+    files = sorted(folder.glob("*.png")) + sorted(folder.glob("*.json")) if folder and folder.is_dir() else []
+    if not files:
+        QMessageBox.information(None, "VoidTrace", "No OCR samples yet. VoidTrace saves one each time it reads "
+                                "relic rewards or a riven.")
+        return
+    zip_path = folder.parent / "VoidTrace OCR samples.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in files:
+            z.write(f, f.name)
+    subprocess.Popen(["explorer", f"/select,{zip_path}"])  # noqa: S603,S607 - shows our own file
 
 
 def show_self_test(game_log_status: Optional[str] = None) -> bool:
@@ -245,8 +264,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     log_file = app_support.setup_logging(args.verbose)
     log.info("VoidTrace starting (log: %s)", log_file)
-    if not getattr(sys, "frozen", False):  # from source only: the released app never saves screenshots
-        cv_cleaner.KEEP_CAPTURES_DIR = Path(__file__).resolve().parent / "captures"
+    # OCR samples (only the reward names / riven card, never the whole screen) for tools/ocr_check.py
+    cv_cleaner.KEEP_CAPTURES_DIR = (default_cache_dir() if getattr(sys, "frozen", False)
+                                    else Path(__file__).resolve().parent) / "captures"
 
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)

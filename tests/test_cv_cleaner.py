@@ -154,19 +154,27 @@ def test_keep_capture_saves_only_when_enabled_and_keeps_the_newest(tmp_path, mon
             self.target()
 
     monkeypatch.setattr(cv_cleaner.threading, "Thread", Now)
-    frame = np.zeros((10, 10, 3), np.uint8)
-    cv_cleaner.keep_capture(frame, "relic")  # off by default (tests, released app)
+    frame = synthetic_reward_screen(["NEKROS PRIME", "FORMA BLUEPRINT"])
+    cv_cleaner.keep_capture(frame, "relic")  # off unless the app turns it on
     assert not any(tmp_path.iterdir())
 
     folder = tmp_path / "captures"
     folder.mkdir()
-    for name in ("2026-01-01_000000_old.png", "2026-01-02_000000_mid.png"):
-        cv2.imwrite(str(folder / name), frame)
+    for stem in ("2026-01-01_000000_relic", "2026-01-02_000000_relic"):
+        cv2.imwrite(str(folder / f"{stem}.png"), frame[:5, :5])
+        (folder / f"{stem}.json").write_text("{}")
     monkeypatch.setattr(cv_cleaner, "KEEP_CAPTURES_DIR", folder)
     monkeypatch.setattr(cv_cleaner, "KEEP_CAPTURES_MAX", 2)
-    cv_cleaner.keep_capture(frame, "riven")
+    cv_cleaner.keep_capture(frame, "relic")
     kept = sorted(p.name for p in folder.iterdir())
-    assert len(kept) == 2 and "2026-01-01_000000_old.png" not in kept and kept[-1].endswith("_riven.png")
+    assert len(kept) == 4 and not any(k.startswith("2026-01-01") for k in kept)
+    new = sorted(folder.glob("*.json"))[-1]
+    meta = __import__("json").loads(new.read_text())
+    band = reward_band(1920, 1080)
+    saved = cv2.imread(str(new.with_suffix(".png")))
+    assert saved.shape[:2] == (band.h, band.w)  # only the name band, not the whole screen
+    rebuilt = cv_cleaner.sample_frame(meta, {"": saved})
+    assert rebuilt.shape == frame.shape and np.array_equal(crop(rebuilt, band), crop(frame, band))
 
 
 @pytest.mark.skipif(find_tesseract() is None, reason="Tesseract not installed")
