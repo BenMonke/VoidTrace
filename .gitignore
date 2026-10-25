@@ -5,3 +5,4 @@ demo_output/
 build/
 dist/
 dist-*/
+captures/

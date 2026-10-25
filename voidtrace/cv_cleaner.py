@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -285,6 +286,29 @@ def capture_screen(monitor: int = 1, centre: Optional[tuple[float, float]] = Non
     frame = np.zeros((mon["height"], mon["width"], 3), dtype=np.uint8)
     frame[y:y + h, x:x + w] = part[:, :, :3]
     return frame
+
+
+KEEP_CAPTURES_DIR: Optional[Path] = None  # set by the app when run from source: OCR test material
+KEEP_CAPTURES_MAX = 200
+
+
+def keep_capture(frame: np.ndarray, kind: str) -> None:
+    """Save a frame the OCR is about to read, for tools/ocr_check.py add. No-op unless enabled."""
+    folder = KEEP_CAPTURES_DIR
+    if folder is None:
+        return
+
+    def save():
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            stamp = time.strftime("%Y-%m-%d_%H%M%S")
+            cv2.imwrite(str(folder / f"{stamp}_{kind}.png"), frame)
+            for old in sorted(folder.glob("*.png"))[:-KEEP_CAPTURES_MAX]:  # oldest first: bounded disk use
+                old.unlink()
+        except OSError:
+            pass  # test material only: never let it break a read
+
+    threading.Thread(target=save, daemon=True).start()  # a 2560x1600 PNG takes ~0.1 s: off the read path
 
 
 def read_reward_texts(

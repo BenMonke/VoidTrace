@@ -30,7 +30,7 @@ from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from voidtrace.cv_cleaner import TesseractNotFound, capture_screen, warframe_is_foreground
 from voidtrace.debug_log import DebugChannelBusy, DebugLogSource, find_warframe_pid
-from voidtrace import app_support, disclaimer, hotkey, online_status, settings, theme, trade_toast
+from voidtrace import app_support, cv_cleaner, disclaimer, hotkey, online_status, settings, theme, trade_toast
 from voidtrace.icons import voidtrace_logo
 from voidtrace.items import load_catalog, load_items
 from voidtrace.ui.market import MarketSection
@@ -245,6 +245,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     log_file = app_support.setup_logging(args.verbose)
     log.info("VoidTrace starting (log: %s)", log_file)
+    if not getattr(sys, "frozen", False):  # from source only: the released app never saves screenshots
+        cv_cleaner.KEEP_CAPTURES_DIR = Path(__file__).resolve().parent / "captures"
 
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)

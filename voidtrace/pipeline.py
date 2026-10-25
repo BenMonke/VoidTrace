@@ -85,6 +85,7 @@ class RewardPipeline:
             if self.foreground_check is not None and not self.foreground_check():
                 raise PipelineSkipped("Warframe is not the active window")
             frame = self.capture_settled()
+            cv_cleaner.keep_capture(frame, "relic")
         t1 = time.perf_counter()
         texts = self.read_texts(frame, self.players, self.ui_scale)
         resolutions = self.resolver.resolve_all(texts)

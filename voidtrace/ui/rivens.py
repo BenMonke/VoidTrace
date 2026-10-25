@@ -100,8 +100,10 @@ class RivenSection(Section):
 
     def read_from_frame(self, frame) -> None:
         """Read the riven card on a screenshot (Ctrl+Shift+R in game) into the price check."""
+        from ..cv_cleaner import keep_capture
         from ..riven_ocr import read_riven
 
+        keep_capture(frame, "riven")
         self.show_toast("Reading the riven\u2026")
         self.run_async(lambda: read_riven(frame, self.catalog), self._riven_read,
                        lambda exc: self.show_toast(f"Could not read the riven: {exc}"))

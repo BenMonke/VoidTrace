@@ -143,6 +143,32 @@ def test_read_reward_texts_runs_one_ocr_per_detected_card(tmp_path):
     assert len(list(tmp_path.glob("slot*_clean.png"))) == 3
 
 
+def test_keep_capture_saves_only_when_enabled_and_keeps_the_newest(tmp_path, monkeypatch):
+    from voidtrace import cv_cleaner
+
+    class Now:  # run the background save inline
+        def __init__(self, target, daemon):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    monkeypatch.setattr(cv_cleaner.threading, "Thread", Now)
+    frame = np.zeros((10, 10, 3), np.uint8)
+    cv_cleaner.keep_capture(frame, "relic")  # off by default (tests, released app)
+    assert not any(tmp_path.iterdir())
+
+    folder = tmp_path / "captures"
+    folder.mkdir()
+    for name in ("2026-01-01_000000_old.png", "2026-01-02_000000_mid.png"):
+        cv2.imwrite(str(folder / name), frame)
+    monkeypatch.setattr(cv_cleaner, "KEEP_CAPTURES_DIR", folder)
+    monkeypatch.setattr(cv_cleaner, "KEEP_CAPTURES_MAX", 2)
+    cv_cleaner.keep_capture(frame, "riven")
+    kept = sorted(p.name for p in folder.iterdir())
+    assert len(kept) == 2 and "2026-01-01_000000_old.png" not in kept and kept[-1].endswith("_riven.png")
+
+
 @pytest.mark.skipif(find_tesseract() is None, reason="Tesseract not installed")
 def test_ocr_reads_synthetic_name():
     frame = synthetic_reward_screen(["NEKROS PRIME"])

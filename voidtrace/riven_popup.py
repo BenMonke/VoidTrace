@@ -16,6 +16,7 @@ from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from . import theme
+from .cv_cleaner import keep_capture
 from .icons import draw_amount, platinum_icon, voidtrace_logo
 from .rivens import (
     PriceCheck,
@@ -281,6 +282,7 @@ class RivenAssistant(QObject):
     def card_shown(self, frame, _layout=None) -> None:
         self._generation += 1
         generation = self._generation
+        keep_capture(frame, "riven")
         if self.popup.draft is None or not self.popup.isVisible():
             self.popup.show_reading()  # a re-read of a showing riven happens quietly behind it
 
