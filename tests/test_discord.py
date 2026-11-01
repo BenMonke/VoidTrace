@@ -113,3 +113,13 @@ def test_settings_panel_saves_and_removes_the_link(qapp):
     assert post.calls and post.calls[-1][1]["embeds"][0]["title"] == "VoidTrace is connected"
     dialog.remove()
     assert n.url() is None
+
+
+def test_network_error_never_puts_the_webhook_in_the_log(qapp, caplog):
+    def offline(url, json, timeout):
+        raise ConnectionError(f"Max retries exceeded with url: {url}")
+
+    n = notifier(offline)
+    n.send("alerts", "Alert", "x")
+    assert "abcDEF" not in n.last_error and "abcDEF" not in caplog.text
+    assert "ConnectionError" in n.last_error

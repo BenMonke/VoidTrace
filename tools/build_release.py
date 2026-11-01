@@ -12,6 +12,7 @@ Output: <out>/VoidTrace/ and <out>/VoidTrace-<version>-windows.zip (out defaults
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import shutil
 import subprocess
@@ -203,3 +204,4 @@ if __name__ == "__main__":
     zip_path = write_zip()
     print(f"\nbuilt {APP} ({folder_size(APP):.0f} MB)")
     print(f"zip   {zip_path} ({zip_path.stat().st_size / 1e6:.0f} MB)")
+    print(f"sha256 {hashlib.sha256(zip_path.read_bytes()).hexdigest()}  (paste this into the release notes)")

@@ -98,3 +98,14 @@ def test_create_shortcuts_reports_failure():
     from voidtrace.app_support import create_shortcuts
 
     assert not create_shortcuts(Path("x.exe"), run=lambda cmd, **kw: type("R", (), {"returncode": 1})())
+
+
+def test_create_shortcuts_escapes_curly_quotes():
+    from pathlib import Path
+
+    from voidtrace.app_support import create_shortcuts
+
+    calls = []
+    create_shortcuts(Path("C:/Games/Ben\u2019s stuff/VoidTrace.exe"),
+                     run=lambda cmd, **kw: calls.append(cmd) or type("R", (), {"returncode": 0})())
+    assert "Ben\u2019\u2019s stuff" in calls[0][-1]

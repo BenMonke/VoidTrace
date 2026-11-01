@@ -1,8 +1,8 @@
 """Shared Warframe.Market API access.
 
 Public data needs no account. Signed-in calls (your own orders) go through `request()` with a
-token from voidtrace.account. Every request is spaced to stay under the site's ~3 requests/second
-guidance.
+token from voidtrace.account. Requests are spaced to stay under the site's API limits (terms, section 11):
+3 a second for listings, 10 a minute for contracts (riven auctions).
 """
 
 from __future__ import annotations
@@ -21,15 +21,18 @@ HEADERS = {
     "Platform": "pc",
     "User-Agent": "VoidTrace/0.2 (Warframe companion)",
 }
-MIN_INTERVAL = 0.35  # seconds between requests
+MIN_INTERVAL = 0.35  # seconds between listing requests
+CONTRACT_INTERVAL = 6.0  # seconds between riven auction requests
 
 
 class MarketClient:
+    # shared by every client: the limits are for the whole app, and prices, sellers and rivens each have one
+    _locks = {"listings": threading.Lock(), "contracts": threading.Lock()}
+    _last = {"listings": 0.0, "contracts": 0.0}
+
     def __init__(self, session: Optional[requests.Session] = None, timeout: float = 10.0) -> None:
         self.session = session or requests.Session()
         self.timeout = timeout
-        self._lock = threading.Lock()
-        self._last_request = 0.0
 
     def get(self, path: str) -> Any:
         """GET {API_BASE}{path} (v2) and return the `data` field of the JSON envelope."""
@@ -49,10 +52,11 @@ class MarketClient:
         """Rate-limited request; the caller checks the status. `url` may be a v1/v2 path or a full URL."""
         if url.startswith("/"):
             url = API_BASE + url
-        with self._lock:
-            wait = MIN_INTERVAL - (time.monotonic() - self._last_request)
+        kind, interval = ("contracts", CONTRACT_INTERVAL) if "/auctions" in url else ("listings", MIN_INTERVAL)
+        with self._locks[kind]:
+            wait = interval - (time.monotonic() - self._last[kind])
             if wait > 0:
                 time.sleep(wait)
-            self._last_request = time.monotonic()
+            self._last[kind] = time.monotonic()
         return self.session.request(method, url, headers={**HEADERS, **(headers or {})}, json=json,
                                     timeout=self.timeout)

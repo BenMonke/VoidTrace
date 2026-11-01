@@ -65,8 +65,12 @@ def create_shortcuts(exe: Path, run: Callable = None) -> bool:
     The folders come from Windows, so a Desktop moved to OneDrive works too."""
     import subprocess
 
-    exe_q = str(exe).replace("'", "''")  # PowerShell single-quoted string
-    dir_q = str(exe.parent).replace("'", "''")
+    def quote(text: str) -> str:  # inside a PowerShell '...' string, which also ends on curly quotes
+        for q in "'‘’‚‛":
+            text = text.replace(q, q * 2)
+        return text
+
+    exe_q, dir_q = quote(str(exe)), quote(str(exe.parent))
     script = (
         "$shell = New-Object -ComObject WScript.Shell; "
         "foreach ($folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) { "

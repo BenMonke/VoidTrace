@@ -78,7 +78,8 @@ class DiscordNotifier:
             try:
                 resp = self._post(url, json=body, timeout=10)
             except Exception as exc:
-                self.last_error = f"Could not reach Discord: {exc}"
+                # not the exception text: it contains the webhook url, and players send us their log
+                self.last_error = f"Could not reach Discord ({type(exc).__name__})."
                 log.warning("discord: %s", self.last_error)
                 return
             if resp.status_code == 429 and attempt == 0:

@@ -445,3 +445,23 @@ def test_mouse_wheel_does_not_change_the_rank_picker(qapp):
     QApplication.sendEvent(window.rank, wheel)
     assert window.rank.currentIndex() == 3
     window.shutdown()
+
+
+def test_client_spaces_riven_auction_requests_apart_from_listings(monkeypatch):
+    import voidtrace.market as market_module
+
+    clock = [1000.0]
+    slept = []
+    monkeypatch.setattr(market_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(market_module.time, "sleep", lambda s: (slept.append(round(s, 2)), clock.__setitem__(0, clock[0] + s)))
+    monkeypatch.setattr(market_module.MarketClient, "_last", {"listings": 0.0, "contracts": 0.0})
+
+    class Session:
+        def request(self, *a, **k):
+            return None
+
+    a, b = market_module.MarketClient(Session()), market_module.MarketClient(Session())
+    a.request("GET", "/v1/auctions/search?type=riven")
+    b.request("GET", "https://api.warframe.market/v1/auctions/search?type=riven")  # other client, same limit
+    a.request("GET", "/orders/item/x")  # listings don't wait for contracts
+    assert slept == [6.0]
