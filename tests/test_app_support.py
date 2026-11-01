@@ -109,3 +109,35 @@ def test_create_shortcuts_escapes_curly_quotes():
     create_shortcuts(Path("C:/Games/Ben\u2019s stuff/VoidTrace.exe"),
                      run=lambda cmd, **kw: calls.append(cmd) or type("R", (), {"returncode": 0})())
     assert "Ben\u2019\u2019s stuff" in calls[0][-1]
+
+
+class ForgetfulKeyring:
+    def __init__(self):
+        self.deleted = []
+
+    def delete_password(self, service, key):
+        self.deleted.append((service, key))
+        if key == "discord webhook":
+            raise RuntimeError("never saved")
+
+
+def test_uninstall_removes_logins_shortcuts_and_data(tmp_path):
+    from voidtrace.app_support import uninstall
+
+    data = tmp_path / "VoidTrace"
+    (data / "captures").mkdir(parents=True)
+    (data / "settings.json").write_text("{}")
+    keyring, calls = ForgetfulKeyring(), []
+    left = uninstall(data, keyring=keyring, run=lambda cmd, **kw: calls.append(cmd))
+    assert left == [] and not data.exists()
+    assert {k for _, k in keyring.deleted} == {"warframe.market token", "warframe.market user", "discord webhook"}
+    assert "Remove-Item" in calls[0][-1] and "VoidTrace.lnk" in calls[0][-1]
+
+
+def test_uninstall_never_deletes_a_folder_with_another_name(tmp_path):
+    from voidtrace.app_support import uninstall
+
+    other = tmp_path / "Documents"
+    other.mkdir()
+    uninstall(other, keyring=ForgetfulKeyring(), run=lambda cmd, **kw: None)
+    assert other.exists()

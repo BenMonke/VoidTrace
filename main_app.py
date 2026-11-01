@@ -147,7 +147,7 @@ def app_icon() -> QIcon:
 
 
 def make_tray(app: QApplication, open_window, game_log_status=lambda: None, toggle_riven_popup=None,
-              toggle_trade_updates=None, status_action=None, add_shortcuts=None) -> QSystemTrayIcon:
+              toggle_trade_updates=None, status_action=None, add_shortcuts=None, uninstall=None) -> QSystemTrayIcon:
     """The tray icon: click it to open VoidTrace; right-click for the toggles and the rest."""
     from voidtrace.ui.main_window import accent_menu
 
@@ -173,6 +173,8 @@ def make_tray(app: QApplication, open_window, game_log_status=lambda: None, togg
     menu.addAction("Open log folder", lambda: _open_folder(app_support.log_path().parent))
     menu.addAction("Export OCR samples (to help improve reading)", export_ocr_samples)
     menu.addAction("Disclaimer (use at your own risk)", lambda: show_disclaimer(first_run=False))
+    if uninstall is not None:
+        menu.addAction("Uninstall VoidTrace…", uninstall)
     menu.addSeparator()
     menu.addAction("Quit VoidTrace", app.quit)
     tray.activated.connect(lambda reason: open_window() if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
@@ -222,6 +224,33 @@ def export_ocr_samples() -> None:
         for f in files:
             z.write(f, f.name)
     subprocess.Popen(["explorer", f"/select,{zip_path}"])
+
+
+def confirm_uninstall() -> bool:
+    answer = QMessageBox.warning(
+        None, "Uninstall VoidTrace",
+        "This removes everything VoidTrace saved on this PC:\n\n"
+        "  - your Warframe.Market sign-in and Discord link (in Windows Credential Manager)\n"
+        "  - the Desktop and Start menu shortcuts\n"
+        "  - settings, price caches, your trade history and the log (%LOCALAPPDATA%\\VoidTrace)\n\n"
+        "Your orders on Warframe.Market stay as they are. VoidTrace quits, then you delete its folder.",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel)
+    return answer == QMessageBox.StandardButton.Yes
+
+
+def finish_uninstall(instance_lock, exe: Optional[Path]) -> None:
+    """After everything has shut down: remove VoidTrace's data, then show the folder that's left."""
+    instance_lock.unlock()
+    left = app_support.uninstall()
+    text = ("VoidTrace is removed from this PC." if not left else
+            "Most of VoidTrace is removed. These couldn't be:\n" + "\n".join(left))
+    if exe is not None:
+        text += "\n\nLast step: delete the VoidTrace folder (Explorer opens on it)."
+    QMessageBox.information(None, "VoidTrace", text)
+    if exe is not None:
+        import subprocess
+
+        subprocess.Popen(["explorer", f"/select,{exe.parent}"])
 
 
 def show_self_test(game_log_status: Optional[str] = None) -> bool:
@@ -410,8 +439,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         tray.showMessage("VoidTrace", "Shortcuts added: on your Desktop and in the Start menu." if done else
                          "Could not add the shortcuts (see the log folder).", app_icon(), 5000)
 
+    uninstall_wanted = []
+
+    def ask_uninstall() -> None:
+        if confirm_uninstall():
+            uninstall_wanted.append(True)
+            app.quit()
+
     tray = make_tray(app, window.open_page, game_log_status, toggle_riven_popup, toggle_trade_updates, window.ingame_action,
-                     add_shortcuts if exe else None)
+                     add_shortcuts if exe else None, ask_uninstall)
     status_keeper.changed.connect(lambda text: tray.setToolTip(f"VoidTrace\n{text}"))
     status_keeper.start()
     riven_watcher.start()
@@ -492,6 +528,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         status_keeper.stop()
         hotkey.unregister()
         hotkey.unregister(hotkey.RIVEN_HOTKEY_ID)
+        if uninstall_wanted:
+            finish_uninstall(instance_lock, exe)
 
 
 if __name__ == "__main__":

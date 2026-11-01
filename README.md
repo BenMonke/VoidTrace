@@ -31,6 +31,11 @@ fight over the same log channel.
 Something broken? Right-click the tray icon, hit Run self-test, and send me the result plus
 `voidtrace.log` (tray > Open log folder).
 
+To uninstall: right-click the tray icon, Uninstall VoidTrace. It removes your saved sign-in and
+Discord link, the shortcuts, and everything in `%LOCALAPPDATA%\VoidTrace` (settings, caches, trade
+history, log). Then it shows you the VoidTrace folder so you can delete it. Your Warframe.Market
+orders stay as they are.
+
 ## How to use it
 
 Open a relic and the prices show up under each reward. Click a price to see who's selling it.

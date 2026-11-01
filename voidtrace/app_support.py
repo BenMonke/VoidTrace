@@ -1,6 +1,6 @@
 """Things the packaged app needs that a developer run doesn't: a log file, one running copy,
-Desktop and Start menu shortcuts, and a self-test a player can run (and send back) when something
-does not work."""
+Desktop and Start menu shortcuts, an uninstall, and a self-test a player can run (and send back) when
+something does not work."""
 
 from __future__ import annotations
 
@@ -91,6 +91,47 @@ def create_shortcuts(exe: Path, run: Callable = None) -> bool:
     log.info("Desktop and Start menu shortcuts created for %s", exe)
     return True
 
+
+
+def uninstall(data_dir: Optional[Path] = None, keyring=None, run: Callable = None) -> list[str]:
+    """Remove what VoidTrace put on this PC: saved logins in Windows Credential Manager, the Desktop and
+    Start menu shortcuts, and %LOCALAPPDATA%\\VoidTrace (settings, caches, trade history, log). Not the
+    app folder: a running exe can't delete itself. Call it once everything has shut down, the log and
+    lock files are open until then. Returns what could not be removed."""
+    import shutil
+    import subprocess
+
+    from .account import KEYRING_SERVICE, KEYRING_TOKEN, KEYRING_USER
+    from .discord import KEYRING_KEY
+
+    if keyring is None:
+        import keyring
+    for key in (KEYRING_TOKEN, KEYRING_USER, KEYRING_KEY):
+        try:
+            keyring.delete_password(KEYRING_SERVICE, key)
+        except Exception:
+            pass  # never saved
+
+    left = []
+    script = ("foreach ($folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) { "
+              "Remove-Item -LiteralPath (Join-Path $folder 'VoidTrace.lnk') -ErrorAction SilentlyContinue }")
+    try:
+        (run or subprocess.run)(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                                capture_output=True, timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:
+        left.append("the Desktop and Start menu shortcuts")
+
+    data_dir = data_dir or default_cache_dir()
+    root = logging.getLogger()
+    for h in root.handlers[:]:  # let go of voidtrace.log so the folder can go
+        if isinstance(h, logging.FileHandler):
+            h.close()
+            root.removeHandler(h)
+    if data_dir.name == "VoidTrace" and data_dir.exists():  # never rmtree anything else
+        shutil.rmtree(data_dir, ignore_errors=True)
+        if data_dir.exists():
+            left.append(str(data_dir))
+    return left
 
 # --- self-test --------------------------------------------------------------------------------
 

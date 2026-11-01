@@ -90,6 +90,10 @@ SOMETHING WRONG?
 QUIT
   Right-click the tray icon > Quit VoidTrace.
 
+UNINSTALL
+  Right-click the tray icon > Uninstall VoidTrace. It removes your saved sign-in, the shortcuts,
+  settings, caches and trade history, then shows this folder so you can delete it.
+
 """ + disclaimer.text_for_file() + "\n"
 
 
