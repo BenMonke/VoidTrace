@@ -80,7 +80,7 @@ class MarketSection(Section):
         self.rank.hide()  # shown once a ranked item is open
         self.online = QCheckBox("Include online sellers")
         self.online.setChecked(True)
-        self.alert_button = QPushButton("Alert me\u2026")
+        self.alert_button = QPushButton("Alert me\…")
         self.alert_button.setToolTip("Tell me when someone sells this at or under a price")
         self.alert_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.alert_button.setEnabled(False)  # until an item is picked
@@ -232,7 +232,7 @@ class MarketSection(Section):
         self.status.setText(f"{len(rows)} sellers" + (f", {n_flag} with unusual prices (greyed out)" if n_flag else "")
                             + " · click one to copy the whisper" if rows else "Nobody is selling this right now.")
         if not rows:
-            self.table.state.message("Nobody's selling this right now", "info", button="Alert me\u2026",
+            self.table.state.message("Nobody's selling this right now", "info", button="Alert me\…",
                                      on_click=self._ask_alert)
 
     def _label_ranks(self, counts: dict) -> None:

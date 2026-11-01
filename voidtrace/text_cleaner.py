@@ -30,8 +30,8 @@ def match_score(a: str, b: str, **_kwargs) -> float:
     """Average of token_set_ratio and ratio.
 
     WRatio, used first, falls back to partial matching on messy text and scores every name sharing
-    "Prime Blade" the same 85.5; on the second live screenshot it turned "Restrel Prime Bia" into
-    Akstiletto Prime Blueprint. token_set_ratio ignores junk words around the name; ratio keeps
+    "Prime Blade" the same 85.5, and it turned "Restrel Prime Bia" into Akstiletto Prime
+    Blueprint on a real screenshot. token_set_ratio ignores junk words around the name; ratio keeps
     "Saryn Prime Blueprint" from beating "Saryn Prime Systems Blueprint" on a subset match.
     """
     return 0.5 * fuzz.token_set_ratio(a, b) + 0.5 * fuzz.ratio(a, b)

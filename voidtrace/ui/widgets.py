@@ -190,7 +190,7 @@ class WheelGuard(QObject):
     check silently turned Puncture into the next stat in the list, Radiation.
     """
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt naming)
+    def eventFilter(self, obj, event) -> bool:
         if event.type() == QEvent.Type.Wheel and not obj.hasFocus():
             event.ignore()  # lets the window scroll instead
             return True
@@ -254,21 +254,17 @@ class Stepper(QFrame):
         self.minus.setEnabled(self.box.value() > self.box.minimum())
         self.plus.setEnabled(self.box.value() < self.box.maximum())
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt naming)
+    def eventFilter(self, obj, event) -> bool:
         if event.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
             self.setProperty("focused", event.type() == QEvent.Type.FocusIn)
             self.style().unpolish(self)
             self.style().polish(self)
         return False
 
-    def setRange(self, minimum: int, maximum: int) -> None:  # noqa: N802 (Qt naming)
-        self.box.setRange(minimum, maximum)
-        self._limits()
-
     def value(self) -> int:
         return self.box.value()
 
-    def setValue(self, value: int) -> None:  # noqa: N802 (Qt naming)
+    def setValue(self, value: int) -> None:
         self.box.setValue(value)
 
 
@@ -337,7 +333,7 @@ class Skeleton(QWidget):
         self.setMaximumWidth(width)
         Pulse.shared().tick.connect(self.update)
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
@@ -378,7 +374,7 @@ class RowHover(QStyledItemDelegate):
             self.pulsing = False
             self.parent().viewport().update()
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt naming)
+    def eventFilter(self, obj, event) -> bool:
         if event.type() == QEvent.Type.Leave:
             self._set(-1)
         return False
@@ -438,7 +434,7 @@ class TableState(QWidget):
         Pulse.shared().tick.connect(lambda: self.update() if self.mode == "loading" and self.isVisible() else None)
         self.hide()
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt naming)
+    def eventFilter(self, obj, event) -> bool:
         if event.type() == QEvent.Type.Resize:
             self.setGeometry(self.parent().rect())
         return False
@@ -484,7 +480,7 @@ class TableState(QWidget):
         self.raise_()
         self.update()
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event) -> None:
         if self.mode != "loading":
             return
         p = QPainter(self)
@@ -683,7 +679,7 @@ class Notice(QFrame):
     def text(self) -> str:
         return self.label.text() if self.tone else ""
 
-    def setText(self, text: str) -> None:  # noqa: N802 (QLabel naming)
+    def setText(self, text: str) -> None:
         self.show_text(text, self.default_tone)
 
     def show_text(self, text: str, tone: str = "info") -> None:
@@ -723,13 +719,13 @@ class Segmented(QFrame):
         self.group.idToggled.connect(lambda i, on: self.currentIndexChanged.emit(i) if on else None)
         self.setFixedHeight(T.CONTROL_HEIGHT)
 
-    def currentIndex(self) -> int:  # noqa: N802 (Qt naming)
+    def currentIndex(self) -> int:
         return self.group.checkedId()
 
-    def setCurrentIndex(self, index: int) -> None:  # noqa: N802 (Qt naming)
+    def setCurrentIndex(self, index: int) -> None:
         self.buttons[index].setChecked(True)
 
-    def currentData(self):  # noqa: N802 (Qt naming)
+    def currentData(self):
         return self.values[self.currentIndex()]
 
 

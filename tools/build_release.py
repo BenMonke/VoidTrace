@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from voidtrace import __version__, disclaimer  # noqa: E402
+from voidtrace import __version__, disclaimer
 
 TESSERACT_DIR = Path(os.environ.get("TESSERACT_DIR", r"C:\Program Files\Tesseract-OCR"))
 BUILD = ROOT / "build"
@@ -100,7 +100,7 @@ def make_icon() -> Path:
 
     from voidtrace.icons import voidtrace_logo
 
-    app = QApplication.instance() or QApplication([])  # noqa: F841 (needed to paint)
+    app = QApplication.instance() or QApplication([])  # needed to paint
     BUILD.mkdir(exist_ok=True)
     png = BUILD / "logo-256.png"
     if not voidtrace_logo(256).toImage().save(str(png), "PNG"):
@@ -197,6 +197,8 @@ if __name__ == "__main__":
     icon = make_icon()
     run_pyinstaller(icon)
     copy_tesseract()
+    shutil.copy2(ROOT / "LICENSE", APP / "LICENSE.txt")
+    shutil.copy2(ROOT / "licenses" / "lucide.txt", APP / "LICENSE-lucide.txt")  # the icons in svg_icons.py
     print(f"pruned {prune():.0f} MB of unused libraries")
     zip_path = write_zip()
     print(f"\nbuilt {APP} ({folder_size(APP):.0f} MB)")

@@ -23,8 +23,8 @@ from .ui.widgets import Pulse, animations_enabled
 CARD_WIDTH_RATIO = 0.95   # card width as a share of one reward slot
 CARD_HEIGHT = 112         # reference pixels at 1080p; scaled with the screen
 # Gap between the reward-name band and the cards. Under each reward the game lists the
-# squad members who picked it (up to 4 names, ~110 px at 1080p); the first live test
-# showed cards placed right under the names covering that list, so they sit below it.
+# squad members who picked it (up to 4 names, ~110 px at 1080p). Cards right under the names
+# covered that list, so they go below it.
 GAP_BELOW_NAMES = 130
 
 BG = QColor(theme.BG_PANEL)
@@ -115,7 +115,7 @@ class OverlayWindow(QWidget):
                 return i
         return None
 
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+    def mouseMoveEvent(self, event) -> None:
         index = self.card_at(event.position().x(), event.position().y())
         index = index if index is not None and self.clickable(index) else None
         if index != self.hovered:
@@ -123,17 +123,17 @@ class OverlayWindow(QWidget):
             self.setCursor(Qt.CursorShape.PointingHandCursor if index is not None else Qt.CursorShape.ArrowCursor)
             self.update()
 
-    def leaveEvent(self, event) -> None:  # noqa: N802
+    def leaveEvent(self, event) -> None:
         if self.hovered is not None:
             self.hovered = None
             self.update()
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         index = self.card_at(event.position().x(), event.position().y())
         if index is not None and self.clickable(index) and event.button() == Qt.MouseButton.LeftButton:
             self.card_clicked.emit(index)
 
-    def paintEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+    def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         for i, (card, rect) in enumerate(zip(self.cards, self.card_rects)):
@@ -191,7 +191,7 @@ class OverlayWindow(QWidget):
                                      width * k, height * k), theme.RADIUS_SM, theme.RADIUS_SM)
 
         if card.name is None:
-            # Never echo raw OCR: on a wrong screen it is junk (live test 2 printed terminal text).
+            # never show raw OCR, on the wrong screen it's junk (it once printed terminal text)
             text("price", "Couldn't read this one", MUTED_LOW, font(12))
             return
         text("name", card.name, MUTED, font(12))

@@ -22,7 +22,7 @@ def qapp():
 
 
 def seller(name, price, rank=None, suspicious=False, rep=5):
-    return SellerOrder(name, "ingame", price, 1, rank, rep, "", suspicious)
+    return SellerOrder(name, "ingame", price, 1, rank, rep, suspicious)
 
 
 ALERT = Alert("volt_prime_set", "Volt Prime Set", 55)

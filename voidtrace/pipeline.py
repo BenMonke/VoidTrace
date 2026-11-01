@@ -20,8 +20,8 @@ from .text_cleaner import EntityResolver, Resolution
 
 log = logging.getLogger(__name__)
 
-# Waiting for the reward cards to finish fading in (live test 4 read Burston Prime Barrel as Strun
-# Prime Barrel from a frame grabbed mid-fade). The name band is grabbed repeatedly; once two grabs
+# Wait for the reward cards to finish fading in (a frame grabbed mid-fade read Burston Prime Barrel
+# as Strun Prime Barrel). The name band is grabbed repeatedly; once two grabs
 # in a row barely differ, the screen has settled.
 SETTLE_STEP_S = 0.12
 SETTLE_TIMEOUT_S = 2.5

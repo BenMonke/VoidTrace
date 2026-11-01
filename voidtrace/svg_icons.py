@@ -1,5 +1,5 @@
 """Line icons as SVG strings, tinted when drawn: the rail's section icons, the flat VoidTrace mark,
-and a small set of Lucide icons (MIT licence, lucide.dev) for buttons, fields and states.
+and a small set of Lucide icons (ISC licence, lucide.dev, see licenses/lucide.txt) for buttons, fields and states.
 
 Kept as code like icons.py, so the build needs no image files. `icon()` and `pixmap()` draw one in
 any colour; `file()` writes a tinted copy to the temp folder for stylesheets, which only take urls.

@@ -90,7 +90,7 @@ def test_feeds_log_watcher_end_to_end():
 
 # --- finding Warframe without psutil ---------------------------------------------------------------
 
-from voidtrace.debug_log import find_warframe_pid  # noqa: E402
+from voidtrace.debug_log import find_warframe_pid
 
 
 def test_find_pid_picks_warframe():

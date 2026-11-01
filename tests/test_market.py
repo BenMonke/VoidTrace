@@ -38,19 +38,19 @@ def qapp():
 # --- whisper ---------------------------------------------------------------------
 
 def test_whisper_for_unranked_item():
-    s = SellerOrder("Kosmo", "ingame", 5, 1, None, 12, "")
+    s = SellerOrder("Kosmo", "ingame", 5, 1, None, 12)
     assert whisper_text(s, "Burston Prime Blueprint") == \
         '/w Kosmo Hi! I want to buy: "Burston Prime Blueprint" for 5 platinum. (warframe.market through VoidTrace)'
 
 
 def test_whisper_for_ranked_mod_includes_rank():
-    s = SellerOrder("Ayla_09", "online", 45, 3, 10, 49, "")
+    s = SellerOrder("Ayla_09", "online", 45, 3, 10, 49)
     assert whisper_text(s, "Primed Continuity", ranked=True) == \
         '/w Ayla_09 Hi! I want to buy: "Primed Continuity (rank 10)" for 45 platinum. (warframe.market through VoidTrace)'
 
 
 def test_whisper_rank_zero_is_still_written():
-    s = SellerOrder("x", "ingame", 40, 1, 0, 0, "")
+    s = SellerOrder("x", "ingame", 40, 1, 0, 0)
     assert '"Primed Continuity (rank 0)"' in whisper_text(s, "Primed Continuity", ranked=True)
 
 
@@ -202,7 +202,7 @@ def _wait(qapp, predicate, timeout=2.0):
 
 
 def test_clicking_a_seller_copies_the_whisper(qapp):
-    rows = [SellerOrder("Kosmo", "ingame", 45, 1, 10, 49, ""), SellerOrder("Ayla_09", "online", 48, 3, 10, 12, "")]
+    rows = [SellerOrder("Kosmo", "ingame", 45, 1, 10, 49), SellerOrder("Ayla_09", "online", 48, 3, 10, 12)]
     sellers = FakeSellers(rows)
     window = MarketSection(CATALOG, sellers)
     window.open_item("primed_continuity")
@@ -224,7 +224,7 @@ def test_clicking_a_seller_copies_the_whisper(qapp):
 
 
 def test_unranked_item_hides_rank_controls(qapp):
-    window = MarketSection(CATALOG, FakeSellers([SellerOrder("Kosmo", "ingame", 4, 1, None, 0, "")]))
+    window = MarketSection(CATALOG, FakeSellers([SellerOrder("Kosmo", "ingame", 4, 1, None, 0)]))
     window.open_item("burston_prime_blueprint")
     _wait(qapp, lambda: window.table.rowCount() == 1)
     assert window.rank.isHidden()
@@ -407,7 +407,7 @@ def test_my_orders_sorting(qapp):
     from PyQt6.QtCore import Qt
 
     header = panel.table.horizontalHeader()
-    sorted_by = lambda: (header.sortIndicatorSection(), header.sortIndicatorOrder())  # noqa: E731
+    sorted_by = lambda: (header.sortIndicatorSection(), header.sortIndicatorOrder())
 
     # Default: visible orders first, then hidden.
     assert [o.visible for o in panel.shown] == [True, True, False, False]
@@ -437,7 +437,7 @@ def test_mouse_wheel_does_not_change_the_rank_picker(qapp):
     from PyQt6.QtCore import QPoint, QPointF, Qt
     from PyQt6.QtGui import QWheelEvent
 
-    window = MarketSection(CATALOG, FakeSellers([SellerOrder("Kosmo", "ingame", 45, 1, 10, 49, "")]))
+    window = MarketSection(CATALOG, FakeSellers([SellerOrder("Kosmo", "ingame", 45, 1, 10, 49)]))
     window.open_item("primed_continuity")
     window.rank.setCurrentIndex(3)
     wheel = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, -120), Qt.MouseButton.NoButton,

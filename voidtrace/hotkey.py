@@ -36,7 +36,7 @@ class HotkeyFilter(QAbstractNativeEventFilter):
             return True
         return False
 
-    def nativeEventFilter(self, event_type, message):  # noqa: N802 (Qt naming)
+    def nativeEventFilter(self, event_type, message):
         if event_type != b"windows_generic_MSG":
             return False, 0
         msg = wintypes.MSG.from_address(int(message))

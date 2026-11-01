@@ -21,7 +21,7 @@ import requests
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tools.update_riven_bases import MANIFEST, read_index  # noqa: E402
+from tools.update_riven_bases import MANIFEST, read_index
 
 OUT = ROOT / "voidtrace" / "data" / "relics.json"
 ERAS = ("Lith", "Meso", "Neo", "Axi")

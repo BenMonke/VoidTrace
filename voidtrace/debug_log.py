@@ -1,7 +1,7 @@
 """Real-time log source: Warframe's debug output instead of the buffered EE.log file.
 
-Warframe writes EE.log in chunks, so a line can reach the file many seconds after it happened (the
-second live test saw "Got rewards" arrive together with the screen's close, 15 s later). The game also
+Warframe writes EE.log in chunks, so a line can reach the file many seconds after it happened (I've
+seen "Got rewards" show up together with the screen's close, 15 s late). The game also
 sends each log line through the Windows debug-output channel (OutputDebugString). Any process can
 listen to that channel; this is what WFInfo (WFInfo/LogCapture.cs) and Sysinternals DebugView do.
 

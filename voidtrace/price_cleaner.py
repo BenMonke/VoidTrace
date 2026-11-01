@@ -173,6 +173,8 @@ class JsonPriceCache:
         self.path = path or default_cache_dir() / "prices.json"
         self._lock = threading.Lock()  # prices are fetched in parallel threads
         self._data: Optional[dict[str, dict]] = None  # the file, read once, then kept in step by put()
+        self._saved_at = 0.0
+        self._dirty = False
 
     def _load(self) -> dict[str, dict]:
         with self._lock:
@@ -205,10 +207,22 @@ class JsonPriceCache:
         data = self._load()
         with self._lock:
             data[stats.slug] = asdict(replace(stats, stale=False))
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data), encoding="utf-8")
-            tmp.replace(self.path)
+            self._dirty = True
+            # the relic pages fetch ~600 prices in a row, don't rewrite the whole file for each one
+            if time.time() - self._saved_at >= 10:
+                self._save()
+
+    def flush(self) -> None:
+        with self._lock:
+            if self._dirty:
+                self._save()
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._data), encoding="utf-8")
+        tmp.replace(self.path)
+        self._saved_at, self._dirty = time.time(), False
 
 
 # --- service ------------------------------------------------------------------

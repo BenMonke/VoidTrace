@@ -67,7 +67,7 @@ class GradeBar(QWidget):
         if value is not None:
             self.setToolTip(f"{value}% of the way from the worst possible roll to the best")
 
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         if self.value is None:
             return
         p = QPainter(self)
@@ -111,7 +111,7 @@ class PriceLine(QWidget):
         self.text, self.loading = "", True
         self.update()
 
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self.loading:
@@ -281,7 +281,7 @@ class RivenPopup(QWidget):
         if not self.isVisible():
             self.show()
 
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QPen(BORDER, 1))
@@ -289,7 +289,7 @@ class RivenPopup(QWidget):
         p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), theme.RADIUS_MD, theme.RADIUS_MD)
         p.end()
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
 

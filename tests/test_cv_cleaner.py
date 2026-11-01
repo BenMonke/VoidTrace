@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import pytest
-from pathlib import Path
 
 from voidtrace.cv_cleaner import (
     Box,
@@ -184,14 +183,51 @@ def test_ocr_reads_synthetic_name():
     assert "NEKROS" in ocr(clean).upper()
 
 
+REWARDS = ["NEKROS PRIME BLUEPRINT", "AKSTILETTO PRIME BARREL", "FORMA BLUEPRINT", "SARYN PRIME SYSTEMS BLUEPRINT"]
+
+
+def harsh_reward_screen(names, width=1920, height=1080, seed=7) -> np.ndarray:
+    """Synthetic reward screen with the lighting problems the real one has."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    frame = 18 + 55 * (xx / width) + 25 * np.sin(yy / 140.0)            # uneven gradient
+    band = reward_band(width, height)
+    for cx, cy, r, amp in [(band.x + band.w // 2, band.y + 30, 120, 120), (band.x + 120, band.y + 70, 90, 80),
+                           (band.x + band.w - 60, band.y + 10, 140, 95)]:
+        frame += amp * np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * r ** 2))  # bloom
+    panel = (yy > band.y - 25) & (yy < band.y + band.h + 25)
+    frame[panel] = frame[panel] * 0.55 + 70 * 0.45                       # translucent UI panel
+    frame += rng.normal(0, 7, frame.shape)                                # sensor/compression noise
+    for _ in range(260):                                                  # particles
+        x, y = int(rng.integers(band.x, band.x + band.w)), int(rng.integers(band.y - 20, band.y + band.h + 20))
+        cv2.circle(frame, (x, y), int(rng.integers(1, 3)), float(rng.integers(150, 230)), -1)
+    frame = np.clip(frame, 0, 255).astype(np.uint8)
+    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+    frame[..., 0] = np.clip(frame[..., 0].astype(int) + 22, 0, 255)      # cool void tint
+
+    scale = screen_scaling(width, height)
+    font, size, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.5 * scale, 2
+    for cx, name in zip(slot_centers(band, len(names)), names):
+        words, rows, row = name.split(), [], ""
+        for word in words:  # wrap to the card width like the game does
+            trial = f"{row} {word}".strip()
+            if cv2.getTextSize(trial, font, size, thick)[0][0] > band.w / 4 - 16 and row:
+                rows.append(row)
+                row = word
+            else:
+                row = trial
+        rows.append(row)
+        for i, text in enumerate(rows):
+            tw, th = cv2.getTextSize(text, font, size, thick)[0]
+            y = band.y + band.h // 2 - (len(rows) - 1) * 14 + i * 28 + th // 2
+            cv2.putText(frame, text, (cx - tw // 2, y), font, size, (228, 226, 214), thick, cv2.LINE_AA)
+    return frame
+
+
+
+
 @pytest.mark.skipif(find_tesseract() is None, reason="Tesseract not installed")
 def test_cleaning_reads_harsh_screen_with_bloom_panel_and_particles():
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("demo", Path(__file__).resolve().parents[1] / "tools" / "demo.py")
-    demo = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(demo)
-    REWARDS, harsh_reward_screen = demo.REWARDS, demo.harsh_reward_screen
     from voidtrace.items import Item
     from voidtrace.text_cleaner import EntityResolver
 

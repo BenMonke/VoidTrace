@@ -81,8 +81,8 @@ class Controller(QObject):
 
     def _on_trigger(self) -> None:
         # The reward cards animate in; wait before capturing. The generation is taken NOW, so a
-        # close that arrives during the wait cancels the capture (live test 2 captured the end
-        # screen because it was checked only after the wait).
+        # close that arrives during the wait cancels the capture (checking only after the wait
+        # once captured the end screen).
         generation = self.generation
         QTimer.singleShot(self.capture_delay_ms, lambda: self.run_once(generation=generation))
 
@@ -203,7 +203,7 @@ def show_disclaimer(first_run: bool) -> bool:
 def _open_folder(path: Path) -> None:
     import os
 
-    os.startfile(str(path))  # noqa: S606 - opens Explorer on our own log folder
+    os.startfile(str(path))
 
 
 def export_ocr_samples() -> None:
@@ -221,7 +221,7 @@ def export_ocr_samples() -> None:
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for f in files:
             z.write(f, f.name)
-    subprocess.Popen(["explorer", f"/select,{zip_path}"])  # noqa: S603,S607 - shows our own file
+    subprocess.Popen(["explorer", f"/select,{zip_path}"])
 
 
 def show_self_test(game_log_status: Optional[str] = None) -> bool:
@@ -277,7 +277,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     first_launch = not settings.get("disclaimer_ok")
     if first_launch and not show_disclaimer(first_run=True):
         return 0
-    instance_lock = app_support.acquire_single_instance()  # noqa: F841 (held until exit)
+    instance_lock = app_support.acquire_single_instance()  # held until exit
     if instance_lock is None:
         QMessageBox.information(None, "VoidTrace", "VoidTrace is already running.\n\n"
                                 "Look for the blue crystal icon in the system tray (bottom right, near the clock). "
@@ -326,6 +326,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     window = MainWindow(market, RelicSection(reward_items, pipeline.prices), riven_data,
                         lambda data: RivenSection(*data, account=market.account), discord=discord)
 
+    def my_name():
+        return market.account.ingame_name if market.account.signed_in else None
+
     def riven_hotkey() -> None:
         """Ctrl+Shift+R: in game, read the riven on screen (Item Details view); else just open Rivens."""
         frame = None
@@ -347,9 +350,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     riven_popup = RivenPopup(screen.geometry())
     theme.on_change(lambda: (riven_popup.update(), overlay.update()))  # painted in the accent
-    riven_assistant = RivenAssistant(riven_data, riven_popup,
-                                     lambda: market.account.ingame_name if market.account.signed_in else None,
-                                     open_riven_details)
+    riven_assistant = RivenAssistant(riven_data, riven_popup, my_name, open_riven_details)
     riven_watcher = RivenScreenWatcher(lambda: capture_screen(args.monitor),
                                        None if args.any_window else warframe_is_foreground,
                                        peek=lambda: capture_screen(args.monitor, centre=PEEK))
@@ -428,8 +429,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     from voidtrace.alerts import AlertWatcher
     from voidtrace.sellers import whisper_text
 
-    alert_watcher = AlertWatcher(market.sellers,
-                                 lambda: market.account.ingame_name if market.account.signed_in else None)
+    alert_watcher = AlertWatcher(market.sellers, my_name)
     market.alerts_changed.connect(alert_watcher.check_now)
     pending_whisper: dict = {}
 
@@ -449,8 +449,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     alert_watcher.found.connect(alert_found)
     tray.messageClicked.connect(tray_message_clicked)
     alert_watcher.start()
-    hotkey_filter = None if args.no_hotkey else hotkey.register(app, lambda: window.open_page("market/buy"))  # noqa: F841
-    riven_hotkey = None if args.no_hotkey else hotkey.register(  # noqa: F841
+    # keep references, or the filters get garbage collected
+    market_filter = None if args.no_hotkey else hotkey.register(app, lambda: window.open_page("market/buy"))
+    riven_filter = None if args.no_hotkey else hotkey.register(
         app, riven_hotkey, key="R", hotkey_id=hotkey.RIVEN_HOTKEY_ID)
 
     if args.riven_shot is not None:
@@ -482,6 +483,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             watcher.stop()
         controller.shutdown()
         window.shutdown()
+        pipeline.prices.cache.flush()
         riven_watcher.stop()
         riven_assistant.shutdown()
         trades.shutdown()

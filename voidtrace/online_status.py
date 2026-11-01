@@ -1,7 +1,7 @@
 """Your Warframe.Market status follows the game: "in game" while Warframe runs, back to what it was
 when the game closes. Off by default (tray > "Show me in game on Warframe.Market while playing").
 
-How (checked live on 2026-10-12): Warframe.Market's websocket, wss://ws.warframe.market/socket with
+How: Warframe.Market's websocket, wss://ws.warframe.market/socket with
 sub-protocol "wfm". Sign in with `@wfm|cmd/auth/signIn {token}`; the server answers with your
 current status (`@wfm|event/status/set`). `@wfm|cmd/status/set {status, duration}` changes it and is
 acknowledged with `:ok`. A status set with a duration (60-21600 s) falls back by itself when it runs

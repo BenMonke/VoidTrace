@@ -26,7 +26,6 @@ class SellerOrder:
     quantity: int
     rank: Optional[int]
     reputation: int
-    updated_at: str
     suspicious: bool = False  # price is a statistical outlier (troll lowball or gouge)
 
 
@@ -55,7 +54,6 @@ def parse_sellers(orders: Sequence[dict], rank: Optional[int] = None, include_on
             quantity=int(o.get("quantity") or 1),
             rank=o.get("rank"),
             reputation=int(user.get("reputation") or 0),
-            updated_at=o.get("updatedAt", ""),
         ))
     # Outliers are judged within each rank: a rank-10 mod at 100p is normal next to rank-0 copies at 45p.
     flagged: dict = {}

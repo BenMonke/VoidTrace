@@ -113,7 +113,7 @@ def test_squad_raises_the_value(qapp):
 
 # --- Task 4: sortable tables, vaulted split, chest icon, cached prices first ----------------------
 
-from PyQt6.QtGui import QColor  # noqa: E402
+from PyQt6.QtGui import QColor
 
 COLS = range(1, 8)
 

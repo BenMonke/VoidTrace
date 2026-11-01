@@ -4,8 +4,8 @@ and riven auctions.
 How signing in works today: Warframe.Market has no OAuth for outside apps yet ("planned"), so this
 uses the same email + password sign-in the website uses (POST /v1/auth/signin), which returns a
 session token. That token is then sent as `Authorization: Bearer ...` to the v2 order endpoints, and
-as `Authorization: JWT ...` to the v1 auction endpoints (rivens; v2 has none yet). The auction calls
-were checked live on 2026-10-11 with one hidden test auction (created, edited, closed).
+as `Authorization: JWT ...` to the v1 auction endpoints (rivens; v2 has none yet). Tested the auction
+calls for real with one hidden auction (create, edit, close).
 
 What is kept, and where:
   * the password is sent only to api.warframe.market and is never stored

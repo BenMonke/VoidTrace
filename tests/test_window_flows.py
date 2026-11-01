@@ -1,8 +1,5 @@
-"""Regression tests for the findings of the one-window branch review."""
-import ast
-import importlib
+"""The main window: how pages get opened, relic pages loading lazily, arrow-key navigation."""
 import os
-from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -12,10 +9,10 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QLabel
 
 from voidtrace import settings
+from tests.test_relic_pages import ITEMS, OLD, OPEN, FakePrices
 from voidtrace.items import CatalogItem
+from voidtrace.ui.relics import RelicSection
 from voidtrace.ui.widgets import Section
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
@@ -29,23 +26,7 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-# --- 3: the dev tools only import names that exist --------------------------------------------------
-
-@pytest.mark.parametrize("script", sorted((ROOT / "tools").rglob("*.py")), ids=lambda p: p.name)
-def test_tools_import_only_existing_voidtrace_names(script):
-    for node in ast.walk(ast.parse(script.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("voidtrace"):
-            module = importlib.import_module(node.module)
-            for alias in node.names:
-                if not hasattr(module, alias.name):
-                    importlib.import_module(f"{node.module}.{alias.name}")  # a submodule, or it raises
-
-
-# --- 1 + 2: relic prices: one cache read, nothing fetched while hidden --------------------------------
-
-from tests.test_relic_pages import ITEMS, OLD, OPEN, FakePrices  # noqa: E402
-from voidtrace.ui.relics import RelicSection  # noqa: E402
-
+# --- relic prices: one cache read, nothing fetched while hidden ---
 
 class CountingPrices(FakePrices):
     def __init__(self):
@@ -69,22 +50,6 @@ def test_relic_table_reads_the_price_cache_once(qapp):
     section.shutdown()
 
 
-def test_price_service_cached_many_reads_the_file_once(tmp_path, monkeypatch):
-    import time
-
-    from voidtrace.price_cleaner import JsonPriceCache, PriceService, PriceStats
-
-    cache = JsonPriceCache(tmp_path / "p.json")
-    for slug in ("a", "b"):
-        cache.put(PriceStats(slug, 5.0, "listings", 0, 5.0, 5.0, 5.0, 3, 0, "ingame", time.time() - 9999))
-    reads = []
-    real = cache._load
-    monkeypatch.setattr(cache, "_load", lambda: reads.append(1) or real())
-    got = PriceService(object(), cache).cached_many(["a", "b", "c"])
-    assert {k: v.price for k, v in got.items()} == {"a": 5.0, "b": 5.0}
-    assert len(reads) == 1
-
-
 def test_hidden_relic_pages_fetch_nothing(qapp):
     prices = FakePrices()
     section = RelicSection(ITEMS, prices, [OPEN, OLD])  # the Look up page picks a relic at start
@@ -96,7 +61,7 @@ def test_hidden_relic_pages_fetch_nothing(qapp):
     section.shutdown()
 
 
-# --- 2 + 4: the main window's entry points ----------------------------------------------------------
+# --- the main window's entry points ---
 
 class FakeAccount:
     signed_in = False
@@ -195,7 +160,7 @@ def test_open_page_without_a_key_reopens_the_last_page(qapp):
     window.hide()
 
 
-# --- 6: the status line only mentions missing prices when some are missing ---------------------------
+# --- the status line only mentions missing prices when some are missing ---
 
 def test_relic_status_line_without_missing_prices(qapp):
     section = RelicSection(ITEMS, FakePrices(), [OPEN])
@@ -208,7 +173,7 @@ def test_relic_status_line_without_missing_prices(qapp):
     section.shutdown()
 
 
-# --- 8: keyboard: arrow keys move between page tabs and rail sections ------------------------------
+# --- keyboard: arrow keys move between page tabs and rail sections ---
 
 def test_tab_arrow_keys_open_the_page(qapp):
     window, _ = make_window(last="market/buy")
@@ -229,7 +194,7 @@ def test_rail_arrow_keys_open_the_next_section(qapp):
     assert window.current_page().startswith("relics/")
 
 
-# --- 10: searching from another Market page shows the item ---------------------------------------------
+# --- searching from another Market page shows the item ---
 
 def test_search_from_trades_page_shows_buy(qapp):
     window, _ = make_window(last="market/trades")

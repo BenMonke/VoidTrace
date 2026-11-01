@@ -231,3 +231,29 @@ def test_json_cache_reads_the_file_once(tmp_path, monkeypatch):
     cache.put(make_stats("b", 2.0))
     assert cache.get_many(["a", "b"])["b"].price == 2.0
     assert len(reads) == 1
+
+
+def test_json_cache_batches_writes_until_flush(tmp_path):
+    path = tmp_path / "p.json"
+    cache = JsonPriceCache(path)
+    cache.put(make_stats("a", 1.0))  # first one is saved right away
+    cache.put(make_stats("b", 2.0))  # within 10 s: kept in memory
+    assert JsonPriceCache(path).get("b") is None
+    cache.flush()
+    assert JsonPriceCache(path).get("b").price == 2.0
+
+
+def test_price_service_cached_many_reads_the_file_once(tmp_path, monkeypatch):
+    import time
+
+    from voidtrace.price_cleaner import JsonPriceCache, PriceService, PriceStats
+
+    cache = JsonPriceCache(tmp_path / "p.json")
+    for slug in ("a", "b"):
+        cache.put(PriceStats(slug, 5.0, "listings", 0, 5.0, 5.0, 5.0, 3, 0, "ingame", time.time() - 9999))
+    reads = []
+    real = cache._load
+    monkeypatch.setattr(cache, "_load", lambda: reads.append(1) or real())
+    got = PriceService(object(), cache).cached_many(["a", "b", "c"])
+    assert {k: v.price for k, v in got.items()} == {"a": 5.0, "b": 5.0}
+    assert len(reads) == 1

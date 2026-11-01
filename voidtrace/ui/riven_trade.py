@@ -44,7 +44,7 @@ class SellPanel(QWidget):
         super().__init__()
         self.window_ = window
         self.draft: Optional[RivenDraft] = None
-        self.summary = QLabel("Fill in your riven on Price check, then press Sell this riven\u2026")
+        self.summary = QLabel("Fill in your riven on Price check, then press Sell this riven\…")
         self.summary.setWordWrap(True)
         self.summary.setTextFormat(Qt.TextFormat.RichText)
         self.name_warning = Notice("warning")  # Post would fail
@@ -63,7 +63,7 @@ class SellPanel(QWidget):
         self.result.setWordWrap(True)
         self.error = Notice("error")
         self.empty = QLabel(objectName="muted")
-        self.empty.setText("Fill in your riven on Price check, then press Sell this riven\u2026")
+        self.empty.setText("Fill in your riven on Price check, then press Sell this riven\…")
 
         self.summary_card, summary = card()
         summary.addWidget(self.summary)
@@ -276,7 +276,7 @@ class MyRivensPanel(QWidget):
                                                     or "none", color=CURSE_COLOR if a.negative else MUTED))
             self.table.setItem(r, self.PRICE, make_cell(str(a.price), right=True, icon=platinum_icon(14)))
             match = self._button("Match lowest")
-            match.clicked.connect(lambda _=False, auction=a, b=match: (b.setText("Matching\u2026"),
+            match.clicked.connect(lambda _=False, auction=a, b=match: (b.setText("Matching\…"),
                                                                        self.reprice(auction)))
             close = icon_button("trash", "Close this auction", theme.NEGATIVE)
             close.clicked.connect(lambda _=False, auction=a: self.close_auction(auction))

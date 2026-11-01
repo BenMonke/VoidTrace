@@ -186,7 +186,7 @@ class PostOrderPanel(QWidget):
         self.post.clicked.connect(self.post_order)
         self.update_price()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         wide = self.width() >= self.WIDE
         self.cards.setDirection(QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom)
@@ -367,7 +367,7 @@ class MyOrdersPanel(QWidget):
             self.table.state.message("Sign in to see your orders", "user", button="Sign in",
                                      on_click=self.window_.show_sign_in, primary=True)
             return
-        self.status.setText("Loading your orders\u2026")
+        self.status.setText("Loading your orders\…")
         if not self.orders:
             self.table.state.loading()
         self.window_.run_async(self.window_.account.my_orders, self._show, self._failed)
@@ -457,7 +457,7 @@ class MyOrdersPanel(QWidget):
             self.table.setItem(r, self.PRICE, make_cell(str(o.platinum), right=True, icon=platinum_icon(14)))
             self.table.setItem(r, self.QTY, make_cell(str(o.quantity), right=True))
             match = self._small_button("Match lowest" if o.type == "sell" else "Match highest")
-            match.clicked.connect(lambda _=False, order=o, b=match: (b.setText("Matching\u2026"), self.reprice(order)))
+            match.clicked.connect(lambda _=False, order=o, b=match: (b.setText("Matching\…"), self.reprice(order)))
             delete = icon_button("trash", "Delete", theme.NEGATIVE)
             delete.clicked.connect(lambda _=False, order=o: self.delete(order))
             self.table.setCellWidget(r, self.MATCH, match)
@@ -490,7 +490,7 @@ class MyOrdersPanel(QWidget):
     def toggle_visible(self, order: MyOrder) -> None:
         item = self.window_.by_id.get(order.item_id)
         name = item.name if item else "order"
-        self.status.setText(f"{'Hiding' if order.visible else 'Showing'} {name}\u2026")
+        self.status.setText(f"{'Hiding' if order.visible else 'Showing'} {name}\…")
         self.window_.run_async(lambda: self.window_.account.update_order(order.id, visible=not order.visible),
                                lambda _: self.refresh(), self._failed)
 

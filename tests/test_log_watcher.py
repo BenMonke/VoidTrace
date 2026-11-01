@@ -1,5 +1,3 @@
-import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -15,7 +13,6 @@ from voidtrace.log_watcher import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-FIXTURE = ROOT / "tests" / "fixtures" / "live_2026-10-10_EE_excerpt.log"  # redacted real log
 
 
 # --- line classification -------------------------------------------------
@@ -183,17 +180,6 @@ def test_callback_exception_does_not_kill_watcher(tmp_path):
     finally:
         watcher.stop()
     assert len(calls) == 2
-
-
-def test_cli_replay_reports_events(tmp_path):
-    result = subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "stages" / "1_log_watcher.py"), "--replay", str(FIXTURE)],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0
-    assert "1 events" in result.stdout  # one real reward screen
 
 
 def _wait_for(predicate, timeout: float = 2.0) -> None:

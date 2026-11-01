@@ -210,7 +210,7 @@ class RelicTablePage(QWidget):
             values[col] = (value, missing)
         priced = [(self.data.plat_of(r), r.name) for r in relic.rewards]
         known = [(p, n) for p, n in priced if p is not None]
-        best = max(known)[1] if known and len(known) == len(priced) else "\u2026"  # \u2026: still loading
+        best = max(known)[1] if known and len(known) == len(priced) else "\…"  # \…: still loading
         return {"relic": relic, "values": values, "best": best}
 
     def sort_value(self, row: dict, column: int):
@@ -223,7 +223,7 @@ class RelicTablePage(QWidget):
         if column == self.ERA:
             return (ERAS.index(relic.era) if relic.era in ERAS else len(ERAS), relic.name)
         if column == self.BEST:
-            return None if row["best"] == "\u2026" else row["best"]
+            return None if row["best"] == "\…" else row["best"]
         value, missing = row["values"][column]
         return None if missing else value
 
@@ -257,13 +257,13 @@ class RelicTablePage(QWidget):
                     cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(i, col, cell)
             best = row["best"]
-            self.table.setItem(i, self.BEST, skeleton_cell(120) if best == "\u2026" and loading else make_cell(best))
+            self.table.setItem(i, self.BEST, skeleton_cell(120) if best == "\…" and loading else make_cell(best))
         self.table.setUpdatesEnabled(True)
         done, asked = self.data.progress()
         missing = any(row["values"][self.RADIANT][1] for row in self.rows)
         failed = missing and not (asked - done)
         if asked - done:
-            text = f"Loading prices {done}/{asked}\u2026"
+            text = f"Loading prices {done}/{asked}\…"
         elif failed:
             text = "Some prices couldn't load (marked *)"
         else:

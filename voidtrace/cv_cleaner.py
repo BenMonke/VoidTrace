@@ -106,9 +106,9 @@ def flatten_illumination(gray: np.ndarray, polarity: Optional[str] = None) -> np
 def text_polarity(img: np.ndarray, upscale: float = 2.0) -> str:
     """"light" or "dark" text, decided over a whole region (the full name band).
 
-    Per-slot decisions failed on live test 3: dark item art reaching into two slots made their
-    black-hat response win, and those slots came out inverted (white text in black blobs). All
-    names on one screen share a colour, so the band decides once for every slot.
+    Deciding per slot didn't work: dark item art reaching into a slot made black-hat win there, and
+    the slot came out inverted (white text in black blobs). All names on a screen are the same
+    colour anyway, so the band decides once for every slot.
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
     if upscale != 1.0:
@@ -197,8 +197,8 @@ def detect_player_count(band_img: np.ndarray) -> int:
     best, best_score = MAX_PLAYERS, float("-inf")
     for players, centers in layouts.items():
         # Every card of a layout must carry text, and its gaps must not: weakest center minus
-        # strongest gap. Averages let two strong middle names outvote empty outer slots
-        # (live test 3 read a 4-card screen as 2 cards).
+        # strongest gap. With averages, two strong middle names outvoted the empty outer slots
+        # and a 4-card screen got read as 2 cards.
         others = [k for k in mass if k not in centers]
         score = min(mass[k] for k in centers) - max(mass[k] for k in others)
         if score > best_score:
@@ -403,7 +403,7 @@ def _letters(text: str) -> int:
 
 def warframe_is_foreground(pid_finder: Optional[Callable[[], Optional[int]]] = None) -> bool:
     """True when the active window belongs to Warframe. Capturing anything else (a terminal, a
-    browser, the desktop) would OCR the wrong screen, which the second live test did."""
+    browser, the desktop) means OCR'ing the wrong screen, which happened once."""
     if sys.platform != "win32":
         return True
     import ctypes

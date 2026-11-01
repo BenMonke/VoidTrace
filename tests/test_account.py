@@ -173,7 +173,7 @@ def test_device_id_is_created_once(tmp_path):
 # --- top orders + pricing ------------------------------------------------------------------
 
 def top(sell=(), buy=()):
-    mk = lambda name, p: TopOrder(name, p, 1, 3, 10, "ingame")  # noqa: E731
+    mk = lambda name, p: TopOrder(name, p, 1, 3, 10, "ingame")
     return {"sell": [mk(n, p) for n, p in sell], "buy": [mk(n, p) for n, p in buy]}
 
 

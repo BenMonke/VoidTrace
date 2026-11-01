@@ -109,7 +109,7 @@ class RivenSection(Section):
         from ..riven_ocr import read_riven
 
         keep_capture(frame, "riven")
-        self.show_toast("Reading the riven\u2026")
+        self.show_toast("Reading the riven\…")
         self.run_async(lambda: read_riven(frame, self.catalog), self._riven_read,
                        lambda exc: self.show_toast(f"Could not read the riven: {exc}"))
 

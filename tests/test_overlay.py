@@ -359,7 +359,7 @@ def test_card_tags_say_when_ducats_win_and_when_sales_are_few():
     from voidtrace.overlay import card_tags
 
     res = EntityResolver(ITEMS).resolve("NEKROS PRIME BLUEPRINT")
-    labels = lambda card: [label for label, _fg, _bg in card_tags(card)]  # noqa: E731
+    labels = lambda card: [label for label, _fg, _bg in card_tags(card)]
     ducats = res.item.ducats
     assert "Ducats" in labels(RewardCard(0, res, stats("nekros_prime_blueprint", ducats / 10)))
     assert "Ducats" not in labels(RewardCard(0, res, stats("nekros_prime_blueprint", ducats / 9)))

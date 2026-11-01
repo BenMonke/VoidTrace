@@ -19,8 +19,8 @@ log = logging.getLogger(__name__)
 
 # Keyword prefilter: cheap substring checks run before the regex.
 # Same markers WFInfo (github.com/WFCD/WFinfo, Data.cs) uses to detect the relic reward
-# screen. "ProjectionRewardChoice.lua: Got rewards" was confirmed in a live relic run on
-# 2026-10-10; "Pause countdown done" is kept from WFInfo but has not been seen here yet.
+# screen. "ProjectionRewardChoice.lua: Got rewards" shows up in real runs; "Pause countdown done"
+# is kept from WFInfo but I haven't seen it yet.
 KEYWORDS: tuple[str, ...] = ("Pause countdown done", "Got rewards")
 TRIGGER_RE = re.compile(r"\b(?:Pause countdown done|Got rewards)\b")
 # Written when the reward screen closes (confirmed in the same live run).
@@ -166,7 +166,7 @@ class RewardScreenEvent:
 
 
 # A trigger whose game timestamp is this far behind the newest line in the same batch arrived
-# too late to act on (EE.log is written in chunks; the second live test saw 11-15 s delays).
+# too late to act on (EE.log is written in chunks, delays of 11-15 s happen).
 STALE_TRIGGER_S = 8.0
 
 

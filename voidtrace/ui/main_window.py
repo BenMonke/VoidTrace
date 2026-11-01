@@ -24,13 +24,13 @@ from .. import online_status, settings, svg_icons
 from .. import theme as T
 from .market import MarketSection
 from .relics import RelicSection
+from .rivens import RivenSection
 from .widgets import BUTTON_STYLE, STYLE, Notice, Section, Skeleton, make_table
 
 log = logging.getLogger(__name__)
 
-RIVEN_PAGES = {"find": "Find", "price": "Price check", "sell": "Sell", "mine": "My rivens"}
 SECTIONS = (("market", "Market", MarketSection.PAGES),
-            ("rivens", "Rivens", RIVEN_PAGES),
+            ("rivens", "Rivens", RivenSection.PAGES),
             ("relics", "Relics", RelicSection.PAGES))
 PAGE_KEYS = [f"{section}/{page}" for section, _title, pages in SECTIONS for page in pages]
 DEFAULT_PAGE = "market/buy"
@@ -101,12 +101,12 @@ class RailTile(QToolButton):
             color = T.TEXT_PRIMARY if self.hovered else T.RAIL_ICON
         self.setIcon(QIcon(svg_icons.pixmap(self.icon_name, color, 22)))
 
-    def enterEvent(self, event) -> None:  # noqa: N802
+    def enterEvent(self, event) -> None:
         self.hovered = True
         self.retint()
         super().enterEvent(event)
 
-    def leaveEvent(self, event) -> None:  # noqa: N802
+    def leaveEvent(self, event) -> None:
         self.hovered = False
         self.retint()
         super().leaveEvent(event)
@@ -123,7 +123,7 @@ class AvatarButton(QToolButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event) -> None:
         super().paintEvent(event)  # the tile's hover and focus
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -170,7 +170,7 @@ class RivenPlaceholder(QWidget):
     def text(self) -> str:
         return self._text
 
-    def setText(self, text: str) -> None:  # noqa: N802 (Qt naming)
+    def setText(self, text: str) -> None:
         self._text = text
         failed = not text.startswith("Loading")
         self.notice.show_text(text if failed else "", "error")
@@ -436,7 +436,7 @@ class MainWindow(QWidget):
             self._select(key)
             self._dock_header(self.section(key.split("/")[0]).page(key.split("/")[1]))
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802 (Qt naming)
+    def eventFilter(self, obj, event) -> bool:
         """Arrow keys: Left/Right move between page tabs, Up/Down between rail sections."""
         if event.type() != QEvent.Type.KeyPress:
             return False
@@ -582,18 +582,18 @@ class MainWindow(QWidget):
 
     # --- window ------------------------------------------------------------------------------------
 
-    def showEvent(self, event) -> None:  # noqa: N802
+    def showEvent(self, event) -> None:
         super().showEvent(event)
         section = self.stack.currentWidget()
         if isinstance(section, Section) and section.current_page():
             section.page_shown(section.current_page())  # pages wait until they are on screen to load
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if not self.isMaximized():  # remember the size it is put back to, not the maximized one
             self._save_size.start()
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event) -> None:
         event.ignore()  # closing only hides it; VoidTrace keeps running in the tray
         self.hide()
 

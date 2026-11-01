@@ -88,13 +88,6 @@ def test_tabs_list_every_page_in_order(qapp):
     assert list(window.tiles) == ["market", "rivens", "relics"]
 
 
-def test_real_riven_section_has_the_tab_pages():
-    from voidtrace.ui.main_window import RIVEN_PAGES
-    from voidtrace.ui.rivens import RivenSection
-
-    assert RivenSection.PAGES == RIVEN_PAGES
-
-
 def test_clicking_a_page_shows_it(qapp):
     window, _ = make_window()
     for key in KEYS:
@@ -157,7 +150,7 @@ def test_account_button_updates_both_sections(qapp):
     window, account = make_window()
     window.show_page("rivens/mine")
     assert settle(qapp, lambda: window.rivens() is not None)
-    menu = lambda: [a.text() for a in window.account_menu.actions() if a.text()]  # noqa: E731
+    menu = lambda: [a.text() for a in window.account_menu.actions() if a.text()]
     assert window.account_button.toolTip() == "Sign in to Warframe.Market"
     assert "Sign in to Warframe.Market" in menu()
     before = window.rivens().refreshed
