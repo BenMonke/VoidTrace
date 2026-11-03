@@ -268,6 +268,19 @@ class Stepper(QFrame):
         self.box.setValue(value)
 
 
+def confirm_price(parent: QWidget, what: str, old: int, new: int) -> bool:
+    """Ask first when a reprice would halve or double a live price, so one troll listing can't set
+    yours to 1p in a single click."""
+    if old <= 0 or old / 2 <= new <= old * 2:
+        return True
+    from PyQt6.QtWidgets import QMessageBox
+
+    answer = QMessageBox.question(parent, "Change the price?",
+                                  f"Change {what} from {old}p to {new}p?\n\nThat's a big jump, so check the "
+                                  "listing it's matching isn't a troll price.")
+    return answer == QMessageBox.StandardButton.Yes
+
+
 def animations_enabled() -> bool:
     """Windows' "Show animations" setting (SPI_GETCLIENTAREAANIMATION); on elsewhere."""
     try:

@@ -30,7 +30,8 @@ from PyQt6.QtWidgets import (
 from .. import svg_icons, theme
 from ..account import MarketError, MyOrder, NotSignedIn, TopOrder, suggested_price, top_orders
 from ..icons import platinum_icon
-from .widgets import (BUTTON_STYLE, STYLE, Notice, Segmented, Stepper, card, form_rows, header_bar, icon_button,
+from .widgets import (BUTTON_STYLE, STYLE, Notice, Segmented, Stepper, card, confirm_price, form_rows, header_bar,
+                      icon_button,
                       make_cell,
                       make_table, refresh_button, set_rows, show_sort)
 
@@ -501,20 +502,21 @@ class MyOrdersPanel(QWidget):
         me = self.window_.account.ingame_name
         self.status.setText(f"Repricing {item.name}…")
 
-        def work():
-            top = top_orders(self.window_.sellers.client, item.slug, order.rank)
-            price = suggested_price(top, order.type, 0, exclude=me)
+        def found(price) -> None:
             if price is None or price == order.platinum:
-                return order, False
-            return self.window_.account.update_order(order.id, platinum=price), True
+                self.status.setText(f"{item.name}: already at the best price ({order.platinum}p).")
+                self.refresh()
+            elif not confirm_price(self, item.name, order.platinum, price):
+                self.status.setText(f"{item.name}: price unchanged.")
+            else:
+                self.window_.run_async(lambda: self.window_.account.update_order(order.id, platinum=price),
+                                       lambda updated: (self.status.setText(f"{item.name}: now {updated.platinum}p."),
+                                                        self.refresh()),
+                                       self._failed)
 
-        def done(result) -> None:
-            updated, changed = result
-            self.status.setText(f"{item.name}: now {updated.platinum}p." if changed else
-                                f"{item.name}: already at the best price ({updated.platinum}p).")
-            self.refresh()
-
-        self.window_.run_async(work, done, self._failed)
+        self.window_.run_async(lambda: suggested_price(top_orders(self.window_.sellers.client, item.slug, order.rank),
+                                                       order.type, 0, exclude=me),
+                               found, self._failed)
 
     def delete(self, order: MyOrder) -> None:
         item = self.window_.by_id.get(order.item_id)

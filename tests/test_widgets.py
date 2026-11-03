@@ -47,3 +47,18 @@ def test_segmented_reads_like_a_combo(qapp):
     assert seg.currentData() == "sell"
     seg.setCurrentIndex(1)
     assert seg.currentData() == "buy" and seen == [1]
+
+
+def test_confirm_price_only_asks_about_big_jumps(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox, QWidget
+
+    from voidtrace.ui.widgets import confirm_price
+
+    asked = []
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a) or QMessageBox.StandardButton.No)
+    parent = QWidget()
+    assert confirm_price(parent, "Volt Prime Set", 100, 60)       # small change: no question
+    assert confirm_price(parent, "Volt Prime Set", 100, 190)
+    assert not confirm_price(parent, "Volt Prime Set", 100, 1)    # troll price: asked, said no
+    assert not confirm_price(parent, "Volt Prime Set", 100, 500)
+    assert len(asked) == 2 and "100p to 1p" in asked[0][2]

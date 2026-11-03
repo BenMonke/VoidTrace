@@ -213,7 +213,11 @@ def test_signed_out_sell_button_asks_to_sign_in(qapp, catalog):
     window.shutdown()
 
 
-def test_my_rivens_toggle_reprice_and_close(qapp, catalog):
+def test_my_rivens_toggle_reprice_and_close(qapp, catalog, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    asked = []  # 5000p down to the cheapest listing is a big drop, so it asks first
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: asked.append(a) or QMessageBox.StandardButton.Yes)
     window, http = _window(catalog)
     window.account.create_riven_auction(DRAFT, buyout=5000)
     window.show_page("mine")
@@ -227,6 +231,7 @@ def test_my_rivens_toggle_reprice_and_close(qapp, catalog):
     # The result stays readable after the list reloads.
     _wait(qapp, lambda: panel.shown and panel.shown[0].buyout < 5000 and "rivens, 1 hidden" in panel.status.text())
     assert "Kulstar Critacan: now" in panel.status.text()
+    assert len(asked) == 1 and "5000p" in asked[0][2]
     panel.close_auction(panel.shown[0])
     _wait(qapp, lambda: panel.table.rowCount() == 0 and "no riven auctions" in panel.status.text())
     window.shutdown()

@@ -283,3 +283,10 @@ def test_letter_grades_match_another_riven_tool():
     assert {r: rivens.grade_letter(r) for r in rolls} == rolls
     assert rivens.grade_letter(1.02, positive=False) == "B"   # a curse 2% above average rates lower
     assert rivens.grade_from_percent(100) == "A+" and rivens.grade_from_percent(0) == "C"
+
+
+def test_price_check_ignores_bid_only_auctions():
+    listings = [auction(1, ["critical_chance"], seller="Troll", buyout=False)] + \
+               [auction(p, ["critical_chance"], seller=f"S{p}") for p in (300, 320, 350)]
+    check = rivens.price_check(listings, ["critical_chance"])
+    assert check.low == 300

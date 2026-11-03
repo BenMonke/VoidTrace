@@ -584,7 +584,8 @@ def price_check(auctions: Sequence[RivenAuction], positives: Sequence[str], nega
     against 20% ones with the same stats.
     """
     me = (exclude_seller or "").casefold()
-    pool = [a for a in auctions if a.price is not None and (not me or a.seller.casefold() != me)]
+    # buyouts only: a bid-only auction's starting price (often 1p) isn't what it sells for
+    pool = [a for a in auctions if a.buyout is not None and (not me or a.seller.casefold() != me)]
     chosen: list[RivenAuction] = []
     tier = "no listings"
     for label, matches in comparable_tiers(positives, negative):

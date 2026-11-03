@@ -25,7 +25,7 @@ from .. import svg_icons, theme
 from ..account import MarketError, NotSignedIn
 from ..icons import platinum_icon
 from ..rivens import PriceCheck, RivenAuction, RivenDraft, price_check, valid_names
-from .widgets import (Notice, Stepper, card, form_rows, header_bar, icon_button, make_cell, make_table,
+from .widgets import (Notice, Stepper, card, confirm_price, form_rows, header_bar, icon_button, make_cell, make_table,
                       refresh_button, set_rows, show_sort)
 from .widgets import BUFF_COLOR, CURSE_COLOR, MUTED
 
@@ -316,23 +316,22 @@ class MyRivensPanel(QWidget):
         me = self.window_.account.ingame_name
         self.status.setText(f"Repricing {title}…")
 
-        def work():
-            listings = self.window_.service.search(auction.weapon)
-            check = price_check(listings, list(auction.positives), auction.negative, exclude_seller=me)
-            if check.low is None or check.low == auction.buyout:
-                return auction, False, check
-            return self.window_.account.update_auction(auction, buyout_price=check.low), True, check
-
-        def done(result) -> None:
-            updated, changed, check = result
+        def found(check) -> None:
             if check.low is None:
                 self.refresh(f"{title}: nothing comparable is listed, price unchanged.")
-            elif changed:
-                self.refresh(f"{title}: now {updated.buyout}p, the cheapest listing with {check.tier}.")
+            elif check.low == auction.buyout:
+                self.refresh(f"{title}: already at the cheapest comparable price ({auction.buyout}p).")
+            elif auction.buyout is not None and not confirm_price(self, title, auction.buyout, check.low):
+                self.refresh(f"{title}: price unchanged.")
             else:
-                self.refresh(f"{title}: already at the cheapest comparable price ({updated.buyout}p).")
+                self.window_.run_async(
+                    lambda: self.window_.account.update_auction(auction, buyout_price=check.low),
+                    lambda updated: self.refresh(f"{title}: now {updated.buyout}p, the cheapest listing with {check.tier}."),
+                    self._failed)
 
-        self.window_.run_async(work, done, self._failed)
+        self.window_.run_async(lambda: price_check(self.window_.service.search(auction.weapon), list(auction.positives),
+                                                   auction.negative, exclude_seller=me),
+                               found, self._failed)
 
     def close_auction(self, auction: RivenAuction) -> None:
         title = self.window_.catalog.riven_title(auction)

@@ -22,7 +22,7 @@ import requests
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "voidtrace" / "data" / "riven_bases.json"
 INDEX = "https://origin.warframe.com/PublicExport/index_en.txt.lzma"
-MANIFEST = "http://content.warframe.com/PublicExport/Manifest/"
+MANIFEST = "https://content.warframe.com/PublicExport/Manifest/"
 
 # Export entry -> Warframe.Market riven type (weapon.rivenType, or group for archguns).
 TYPES = {
