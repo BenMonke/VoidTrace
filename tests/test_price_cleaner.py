@@ -5,6 +5,8 @@ from voidtrace.price_cleaner import (
     PriceService,
     PriceStats,
     iqr_filter,
+    overpaying,
+    paid_text,
     select_sell_prices,
     summarize,
     trade_price,
@@ -78,6 +80,24 @@ def test_trade_price_falls_back_to_last_7_days():
     payload = stats_payload([(9, 2)], days_90=[(50, 9)] * 3 + [(20, 3)] * 7)
     price, volume, basis = trade_price(payload)
     assert basis == "trades_7d" and volume == 21 and price == 20
+
+
+def test_overpaying_needs_25_percent_and_5_plat_over_real_sales():
+    assert overpaying(125, 70)          # the Volt Prime set case: +79%
+    assert overpaying(88, 70)           # +25.7%, +18p
+    assert not overpaying(85, 70)       # +21%: normal haggling room
+    assert not overpaying(8, 4)         # +100% but only 4p: noise on cheap items
+    assert overpaying(9, 4)
+    assert not overpaying(500, None)    # too few sales to say
+    assert paid_text(69.6) == "Most people paid about 70 for this."
+
+
+def test_trade_price_by_rank_only_counts_that_rank():
+    closed = [{"median": 45, "volume": 6, "mod_rank": 0}, {"median": 110, "volume": 9, "mod_rank": 10}]
+    payload = {"statistics_closed": {"48hours": closed, "90days": []}}
+    assert trade_price(payload, rank=0)[0] == 45
+    assert trade_price(payload, rank=10)[0] == 110
+    assert trade_price(payload, rank=5) == (None, 0, None)
 
 
 def test_trade_price_none_when_illiquid_or_missing():

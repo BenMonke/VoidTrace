@@ -102,12 +102,17 @@ def select_sell_prices(orders: Sequence[dict], min_samples: int = MIN_SAMPLES) -
     return prices, tier
 
 
-def trade_price(statistics: Optional[dict], min_trades: int = MIN_TRADES) -> tuple[Optional[float], int, Optional[str]]:
-    """(price, volume, basis) from Warframe.Market closed-trade statistics, or (None, 0, None)."""
+def trade_price(statistics: Optional[dict], min_trades: int = MIN_TRADES,
+                rank: Optional[int] = None) -> tuple[Optional[float], int, Optional[str]]:
+    """(price, volume, basis) from Warframe.Market closed-trade statistics, or (None, 0, None).
+    With `rank`, only sales of that mod rank count."""
     closed = (statistics or {}).get("statistics_closed") or {}
-    windows = (("trades_48h", closed.get("48hours") or []), ("trades_7d", (closed.get("90days") or [])[-7:]))
+    # 90days has one bucket per day per rank, so "last 7 days" is the last 7 buckets of that rank
+    days = [b for b in closed.get("90days") or [] if rank is None or b.get("mod_rank") == rank]
+    windows = (("trades_48h", closed.get("48hours") or []), ("trades_7d", days[-7:]))
     for basis, buckets in windows:
-        buckets = [b for b in buckets if b.get("volume") and b.get("median") is not None]
+        buckets = [b for b in buckets if b.get("volume") and b.get("median") is not None
+                   and (rank is None or b.get("mod_rank") == rank)]
         volume = sum(int(b["volume"]) for b in buckets)
         if volume >= min_trades:
             return weighted_median([b["median"] for b in buckets], [b["volume"] for b in buckets]), volume, basis
@@ -157,6 +162,19 @@ def price_basis_label(price: PriceStats) -> str:
     if price.basis == "trades_7d":
         return f"{price.trade_volume} sold / 7d"
     return f"listings ({price.source})"
+
+
+OVERPAY_RATIO = 1.25  # an ask this far over what people really paid gets a warning...
+OVERPAY_MIN = 5       # ...if it is also at least this many plat over (3p vs 4p is noise)
+
+
+def overpaying(ask: float, paid: Optional[float]) -> bool:
+    """True when `ask` is far above `paid`, the median of real recent sales (None: not enough sales)."""
+    return paid is not None and ask >= paid * OVERPAY_RATIO and ask - paid >= OVERPAY_MIN
+
+
+def paid_text(paid: float, name: str = "this") -> str:
+    return f"Most people paid about {round(paid)} for {name}."
 
 
 # --- caches -------------------------------------------------------------------
@@ -239,6 +257,18 @@ class PriceService:
         self.client = client or MarketClient()
         self.cache = cache if cache is not None else JsonPriceCache()
         self.max_age = max_age
+        self._sales: dict[str, tuple[float, Optional[dict]]] = {}
+
+    def sales(self, slug: str) -> Optional[dict]:
+        """Closed-trade statistics for `slug`, kept in memory for `max_age` (the Buy tab refetches on every
+        rank change)."""
+        hit = self._sales.get(slug)
+        if hit is not None and time.time() - hit[0] < self.max_age:
+            return hit[1]
+        stats = self._statistics(slug)
+        if stats is not None:
+            self._sales[slug] = (time.time(), stats)
+        return stats
 
     def _cached(self, slug: str) -> Optional[PriceStats]:
         try:

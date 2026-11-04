@@ -19,9 +19,10 @@ from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout, QWidget
 from . import settings, theme
 from .account import Account
 from .items import CatalogItem
+from .price_cleaner import PriceService, overpaying, paid_text, trade_price
 from .ui.widgets import animations_enabled
-from .trades import (OrderChange, Trade, TradeHistory, TradeReader, apply_changes, item_finder, plan_changes,
-                     summary, undo)
+from .trades import (PLATINUM, OrderChange, Trade, TradeHistory, TradeReader, apply_changes, item_finder,
+                     plan_changes, summary, undo)
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ QFrame#toast {{ background: rgba(22, 25, 31, 240); border: 1px solid {theme.BORD
 QLabel {{ color: {theme.TEXT_PRIMARY}; background: transparent; font-family: {theme.FONT_STACK}; font-size: 12px; }}
 QLabel#title {{ font-size: 13px; font-weight: 600; }}
 QLabel#title[error="true"] {{ color: {theme.NEGATIVE}; }}
+QLabel#title[warning="true"] {{ color: {theme.WARNING}; }}
 QPushButton {{ background: {theme.BG_RAISED}; color: {theme.TEXT_PRIMARY}; border: 1px solid {theme.BORDER_STRONG};
     border-radius: 4px; padding: 0 12px; min-height: 30px; font-family: {theme.FONT_STACK}; font-size: 13px; }}
 QPushButton:hover {{ background: {theme.BG_HOVER}; }}
@@ -103,9 +105,18 @@ class TradeToast(QWidget):
         self._on_undo = None
         self._pop(NOTE_MS)
 
-    def _set_title(self, text: str) -> None:
+    def show_warning(self, text: str) -> None:
+        """Shown while the trade confirm dialog is still open, so there is time to cancel."""
+        self._set_title("Check the price", warning=True)
+        self.text.setText(text)
+        self.undo_button.hide()
+        self._on_undo = None
+        self._pop(SHOW_MS)
+
+    def _set_title(self, text: str, warning: bool = False) -> None:
         self.title.setText(text)
         self.title.setProperty("error", text.startswith("Couldn't"))
+        self.title.setProperty("warning", warning)
         self.title.style().unpolish(self.title)
         self.title.style().polish(self.title)
 
@@ -162,12 +173,14 @@ class TradeTracker(QObject):
 
     applied = pyqtSignal(object, object)  # trade, the changes that went through
     note = pyqtSignal(str)
+    warn = pyqtSignal(str)  # "you're overpaying", while the trade can still be cancelled
     recorded = pyqtSignal(object)  # a TradeRecord, saved to the history
 
     def __init__(self, account: Account, catalog: Sequence[CatalogItem], toast: TradeToast,
                  is_enabled: Callable[[], bool] = enabled, on_orders_changed: Callable[[], None] = lambda: None,
-                 history: Optional[TradeHistory] = None) -> None:
+                 history: Optional[TradeHistory] = None, prices: Optional[PriceService] = None) -> None:
         super().__init__()
+        self.prices = prices  # real sales, for the overpaying warning; None turns it off
         self.account = account
         self.find = item_finder(catalog)
         self.toast = toast
@@ -178,16 +191,40 @@ class TradeTracker(QObject):
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="VoidTrace-Trades")
         self.applied.connect(self._show)
         self.note.connect(self._note)
+        self.warn.connect(self.toast.show_warning)
 
     def feed(self, line: str) -> None:
         """Every game log line (log thread)."""
         trade = self.reader.feed(line)
+        if self.reader.offered is not None and self.prices is not None:
+            self.executor.submit(self.check_price, self.reader.offered)
         if trade is None:
             return
         log.info("trade with %s: gave %s; got %s", trade.partner, trade.gave, trade.got)
         self.executor.submit(self.record, trade)  # kept whether or not orders are updated
         if self.is_enabled() and self.account.signed_in:
             self.executor.submit(self.handle, trade)
+
+    def check_price(self, trade: Trade) -> Optional[str]:
+        """Warn while the confirm dialog is open if you are paying far more than people paid lately.
+        Only plat for one kind of item: with several, nobody knows how the plat splits."""
+        got = [i for i in trade.got if i.name.casefold() != PLATINUM]
+        if not trade.plat_given or trade.plat_got or len(got) != 1:
+            return None
+        item = self.find(got[0].name)
+        if item is None or (item.max_rank is not None and got[0].rank is None):
+            return None
+        try:
+            paid, _, _ = trade_price(self.prices.sales(item.slug), rank=got[0].rank if item.max_rank is not None else None)
+        except Exception as exc:
+            log.warning("trade: price check failed for %s: %s", item.slug, exc)
+            return None
+        each = trade.plat_given / got[0].quantity
+        if not overpaying(each, paid):
+            return None
+        text = f"{paid_text(paid, item.name)} You're paying {round(each)}."
+        self.warn.emit(text)
+        return text
 
     def record(self, trade: Trade) -> None:
         self.recorded.emit(self.history.add(trade))

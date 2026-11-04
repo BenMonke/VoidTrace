@@ -190,7 +190,8 @@ class MainWindow(QWidget):
                  discord=None) -> None:
         super().__init__()
         self.setWindowTitle("VoidTrace")
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
+        # a normal window: the hotkey still raises it, but other apps can go on top of it
+        self.setWindowFlags(Qt.WindowType.Window)
         T.follow(self, STYLE + BUTTON_STYLE + SHELL_STYLE)
         self.market, self.relics = market, relics
         self.account = market.account

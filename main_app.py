@@ -337,7 +337,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     from voidtrace.ui.relics import RelicSection
     from voidtrace.ui.rivens import RivenSection
 
-    market = MarketSection(load_catalog(), SellerService())
+    market = MarketSection(load_catalog(), SellerService(), prices=pipeline.prices)
     riven_data_cache: dict = {}
     riven_data_lock = threading.Lock()
 
@@ -407,7 +407,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             market.orders_panel.refresh()
 
     trades = trade_toast.TradeTracker(market.account, market.catalog, trade_toast.TradeToast(screen.geometry()),
-                                      on_orders_changed=refresh_my_orders)
+                                      on_orders_changed=refresh_my_orders, prices=pipeline.prices)
     trades.recorded.connect(market.trades_panel.add)
     from voidtrace.trades import summary as trade_summary
 

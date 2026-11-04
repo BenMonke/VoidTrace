@@ -2,13 +2,13 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 from PyQt6.QtWidgets import QApplication
 
 from voidtrace.ui.trades import TradeHistoryPanel, items_text
-from voidtrace.trades import Trade, TradeHistory, TradeItem
+from voidtrace.trades import Trade, TradeHistory, TradeItem, daily_net
 
 NOW = datetime(2026, 10, 12, 18, 0)
 
@@ -47,6 +47,21 @@ def test_panel_rows_newest_first_and_totals(qapp, history):
     assert panel.today.value.text() == "-15p"
     assert panel.today.detail.text() == "10 in · 25 out · 2 trades"
     assert panel.all_time.value.text() == "+15p"
+
+
+def test_daily_net_runs_from_the_all_time_total_and_keeps_quiet_days(history):
+    points = daily_net(history.load(), date(2026, 10, 10), date(2026, 10, 12))
+    assert points == [(date(2026, 10, 10), 0, 30), (date(2026, 10, 11), 0, 30), (date(2026, 10, 12), -15, 15)]
+
+
+def test_chart_needs_two_trading_days_in_the_range(qapp, history):
+    panel = TradeHistoryPanel(history, now=lambda: NOW)
+    panel.refresh()
+    assert len(panel.chart.points) == 30 and not panel.chart.has_data()  # 30d: only 12 Oct traded
+    panel.range.setCurrentIndex(2)  # All: 1 Sep and 12 Oct
+    assert panel.chart.points[0] == (date(2026, 9, 1), 30, 30) and panel.chart.has_data()
+    panel.resize(600, 400)
+    panel.chart.grab()  # paints without errors
 
 
 def test_new_trade_shows_without_refresh(qapp, history):

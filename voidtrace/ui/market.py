@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 from ..account import Account
 from ..icons import platinum_icon
 from ..items import CatalogItem
+from ..price_cleaner import PriceService, overpaying, paid_text, trade_price
 from ..sellers import SellerOrder, SellerService, rank_counts, whisper_text
 from ..search import search_catalog
 from .. import theme as T
@@ -50,13 +51,14 @@ def item_title(item: CatalogItem) -> str:
 
 class MarketSection(Section):
     PAGES = {"buy": "Buy", "sell": "Sell", "orders": "My orders", "trades": "Trades", "alerts": "Alerts"}
-    _sellers_ready = pyqtSignal(int, list)
+    _sellers_ready = pyqtSignal(int, list, dict)
     _sellers_failed = pyqtSignal(int, str)
     alerts_changed = pyqtSignal()
 
     def __init__(self, catalog: Sequence[CatalogItem], sellers: SellerService,
-                 account: Optional[Account] = None) -> None:
+                 account: Optional[Account] = None, prices: Optional[PriceService] = None) -> None:
         super().__init__()
+        self.prices = prices  # real sales, for the "you're overpaying" warning; None turns it off
         self.catalog = list(catalog)
         self.by_slug = {item.slug: item for item in self.catalog}
         self.by_id = {item.id: item for item in self.catalog if item.id}
@@ -187,7 +189,8 @@ class MarketSection(Section):
 
         def work():
             try:
-                self._sellers_ready.emit(request, self.sellers.sellers(slug, rank, online))
+                rows = self.sellers.sellers(slug, rank, online)
+                self._sellers_ready.emit(request, rows, self._paid_by_rank(slug, rows))
             except Exception as exc:  # network trouble must not kill the UI
                 log.warning("seller fetch failed for %s: %s", slug, exc)
                 self._sellers_failed.emit(request, str(exc))
@@ -199,15 +202,36 @@ class MarketSection(Section):
             self.status.setText("Could not reach Warframe.Market. Try again in a moment.")
             self.table.state.error(retry=self.refresh)
 
-    def _on_sellers(self, request: int, rows: list) -> None:
+    def _paid_by_rank(self, slug: str, rows: list) -> dict:
+        """Rank (None for unranked items) -> median of real recent sales at that rank (worker thread)."""
+        if self.prices is None or not rows:
+            return {}
+        try:
+            stats = self.prices.sales(slug)
+        except Exception as exc:  # the warning is extra: never lose the seller list over it
+            log.warning("sales fetch failed for %s: %s", slug, exc)
+            return {}
+        return {r: trade_price(stats, rank=r)[0] for r in {s.rank for s in rows}}
+
+    def _overpriced(self, s: SellerOrder, paid: dict) -> Optional[float]:
+        """What people really paid, when this seller asks far more than that; else None."""
+        if s.suspicious or (s.rank is None and self.item is not None and self.item.max_rank is not None):
+            return None  # troll listings are greyed out already; a ranked item without a rank can't be compared
+        price = paid.get(s.rank)
+        return price if overpaying(s.platinum, price) else None
+
+    def _on_sellers(self, request: int, rows: list, paid: dict) -> None:
         if request != self._request:
             return  # an older request finished after the user moved on
         if self.item is not None and self.item.max_rank is not None and self.selected_rank() is None:
             self._label_ranks(rank_counts(rows))
         self.rows = rows
         set_rows(self.table, len(rows))
-        dim = QColor(T.TEXT_MUTED)
+        dim, warn = QColor(T.TEXT_MUTED), QColor(T.WARNING)
+        overpay: Optional[float] = None
         for r, s in enumerate(rows):
+            too_much = self._overpriced(s, paid)
+            overpay = overpay if too_much is None else too_much
             cells = [s.ingame_name, STATUS_LABEL.get(s.status, s.status), "" if s.rank is None else str(s.rank),
                      str(s.platinum), str(s.quantity), str(s.reputation)]
             for c, value in enumerate(cells):
@@ -221,6 +245,9 @@ class MarketSection(Section):
                 if s.suspicious:
                     cell.setForeground(dim)
                     cell.setToolTip("Price is far from the other sellers: likely a troll listing or a typo.")
+                elif c == 3 and too_much is not None:
+                    cell.setForeground(warn)
+                    cell.setToolTip(f"{paid_text(too_much)} This seller wants {s.platinum}.")
                 else:
                     cell.setToolTip("Click to copy the whisper")
                 self.table.setItem(r, c, cell)
@@ -231,6 +258,8 @@ class MarketSection(Section):
         n_flag = sum(s.suspicious for s in rows)
         self.status.setText(f"{len(rows)} sellers" + (f", {n_flag} with unusual prices (greyed out)" if n_flag else "")
                             + " · click one to copy the whisper" if rows else "Nobody is selling this right now.")
+        if overpay is not None and len(paid) == 1:  # with "Any rank" each rank has its own price: tooltips only
+            self.status.setText(f"{paid_text(overpay)} {self.status.text()}")
         if not rows:
             self.table.state.message("Nobody's selling this right now", "info", button="Alert me\…",
                                      on_click=self._ask_alert)

@@ -263,6 +263,45 @@ def test_tracker_does_nothing_when_turned_off_but_still_records(qapp, tmp_path):
     tracker.shutdown()
 
 
+def buying(what: str, plat: int) -> list[str]:
+    """The confirm dialog of a trade where you give plat for `what` (same log shape as REAL_TRADE)."""
+    return [f"342.423 Script [Info]: Dialog.lua: Dialog::CreateOkCancel(description=Are you sure you want to "
+            f"accept this trade? You are offering:", f"Platinum x {plat}", "",
+            "and will receive from TraderJoe the following:",
+            f"{what}, title= leftItem=/Menu/Confirm_Item_Ok, rightItem=/Menu/Confirm_Item_Cancel)"]
+
+
+class FakePrices:
+    def __init__(self, closed):
+        self.payload = {"statistics_closed": {"48hours": closed, "90days": []}}
+
+    def sales(self, slug):
+        return self.payload
+
+
+def test_tracker_warns_before_you_overpay(qapp, tmp_path):
+    from voidtrace.trade_toast import TradeToast, TradeTracker
+
+    toast = TradeToast(QRect(0, 0, 1920, 1080))
+    prices = FakePrices([{"median": 45, "volume": 6, "mod_rank": 0}, {"median": 70, "volume": 9, "mod_rank": 5}])
+    tracker = TradeTracker(FakeAccount([]), CATALOG, toast, is_enabled=lambda: False,
+                           history=TradeHistory(tmp_path / "t.jsonl"), prices=prices)
+    tracker.executor.submit = lambda fn, *a: fn(*a)
+    for line in buying("Hollow Point (RARE RANK 5)", 125):  # no "successful" line yet: still cancellable
+        tracker.feed(line)
+    qapp.processEvents()
+    assert toast.isVisible() and toast.title.text() == "Check the price"
+    assert toast.text.text() == "Most people paid about 70 for Hollow Point. You're paying 125."
+    toast.hide()
+    assert tracker.check_price(Trade("x", (TradeItem("Platinum", 80),), (TradeItem("Hollow Point", 1, 5),))) is None
+    assert tracker.check_price(Trade("x", (TradeItem("Platinum", 125),), (TradeItem("Hollow Point", 1, 0),))) \
+        == "Most people paid about 45 for Hollow Point. You're paying 125."
+    assert tracker.check_price(Trade("x", (TradeItem("Platinum", 125),), (TradeItem("Hollow Point", 1),))) is None
+    assert tracker.check_price(Trade("x", (TradeItem("Platinum", 300),),  # two kinds of item: can't split the plat
+                                     (TradeItem("Hollow Point", 1, 5), TradeItem("Forma Blueprint", 1)))) is None
+    tracker.shutdown()
+
+
 # --- history -----------------------------------------------------------------------------------------
 
 def test_history_round_trip_skips_bad_lines(tmp_path):

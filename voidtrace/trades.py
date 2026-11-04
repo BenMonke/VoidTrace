@@ -24,7 +24,7 @@ import logging
 import re
 import threading
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Iterable, Optional, Sequence
 
@@ -83,6 +83,7 @@ class TradeReader:
     """Feed it every log line; it returns a Trade on the line that says the trade went through."""
 
     def __init__(self) -> None:
+        self.offered: Optional[Trade] = None
         self._collecting = False
         self._lines = 0
         self._side: list[TradeItem] = []
@@ -93,6 +94,7 @@ class TradeReader:
         self._pending_at: Optional[float] = None
 
     def feed(self, line: str) -> Optional[Trade]:
+        self.offered = None  # set on the line that completes the confirm dialog (not yet accepted)
         if TRADE_START in line:
             self._collecting, self._partner, self._lines = True, "", 0
             self._gave, self._got = [], []
@@ -134,7 +136,7 @@ class TradeReader:
         if ended:
             self._collecting = False
             if self._partner:
-                self._pending = Trade(self._partner, tuple(self._gave), tuple(self._got))
+                self._pending = self.offered = Trade(self._partner, tuple(self._gave), tuple(self._got))
 
 
 # --- matching your orders ----------------------------------------------------------------------
@@ -309,6 +311,25 @@ class TradeHistory:
             except (ValueError, KeyError, TypeError):
                 continue
         return records
+
+
+def daily_net(records: Iterable[TradeRecord], start: date, end: date) -> list[tuple[date, int, int]]:
+    """(day, net plat that day, running net) for every day from `start` to `end`, quiet days included.
+    The running net counts trades before `start` too, so it ends on the all-time total."""
+    by_day: dict[date, int] = {}
+    total = 0
+    for r in records:
+        day = r.time.date()
+        if day < start:
+            total += r.plat
+        elif day <= end:
+            by_day[day] = by_day.get(day, 0) + r.plat
+    out = []
+    while start <= end:
+        total += by_day.get(start, 0)
+        out.append((start, by_day.get(start, 0), total))
+        start += timedelta(days=1)
+    return out
 
 
 def totals(records: Iterable[TradeRecord], since: Optional[datetime] = None) -> Totals:
