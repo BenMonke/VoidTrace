@@ -55,6 +55,7 @@ THE VOIDTRACE WINDOW
     Market  Buy, Sell, My orders, Trades, Alerts
     Rivens  Find, Price check, Sell, My rivens
     Relics  Unvaulted, Vaulted, Look up
+    Ducanator  Best value
   Sign in to Warframe.Market and Accent colour are at the bottom of the sidebar.
   In game: Ctrl+Shift+M opens Market > Buy; Ctrl+Shift+R reads the riven on screen into Rivens.
 
@@ -73,6 +74,9 @@ RIVENS
 RELICS
   Unvaulted (green chest) and Vaulted (red chest): every relic's average plat and ducats; click a
   column to sort. Look up: one relic's rewards, prices and chances. Solo or squad of 4.
+
+DUCANATOR
+  Best value: prime parts sorted by ducats per plat, so you know what's cheapest to buy for Baro.
 
 ONLINE STATUS (optional, off by default)
   Tray > "Show me in game on Warframe.Market while playing": while signed in, your Warframe.Market

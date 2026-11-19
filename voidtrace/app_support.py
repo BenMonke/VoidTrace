@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import sys
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -44,6 +45,9 @@ def setup_logging(verbose: bool = False) -> Path:
         sys.__excepthook__(exc_type, exc, tb)
 
     sys.excepthook = log_crash
+    # Worker threads too (log reader, scan, prices): the packaged app has no console to print them to.
+    threading.excepthook = lambda a: log.critical("VoidTrace thread %s crashed", a.thread.name if a.thread else "?",
+                                                  exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
     return path
 
 

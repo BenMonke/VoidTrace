@@ -336,6 +336,19 @@ def test_capture_waits_until_the_name_band_stops_changing():
     assert len(grabbed) >= 6
 
 
+def test_screen_closing_mid_capture_stops_the_read():
+    """The screen closed 0.4 s after the trigger, yet capture went on for 2.65 s and the
+    OCR read whatever came next ("no reward names recognised"). Stop as soon as it closes."""
+    from voidtrace.pipeline import PipelineSkipped
+
+    grabbed, read = [], []
+    pipeline = RewardPipeline(EntityResolver(ITEMS), FakePrices(), capture=lambda: grabbed.append(1) or BLANK,
+                              read_texts=lambda *a: read.append(1) or ["FORMA BLUEPRINT"])
+    with pytest.raises(PipelineSkipped):
+        pipeline.read(still_open=lambda: len(grabbed) < 2)
+    assert len(grabbed) == 2 and read == []
+
+
 def test_second_look_replaces_a_misread_from_the_first_capture():
     # First capture caught the fade (junk), the second look reads it properly.
     reads = iter([["FORMA BLUEPRINT", "~~ ."], ["FORMA BLUEPRINT", "NEKROS PRIME BLUEPRINT"]])

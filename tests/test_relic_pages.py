@@ -235,6 +235,26 @@ def test_prices_arriving_fast_redraw_at_most_once_per_interval(qapp):
     assert redraws == [1]
 
 
+def test_relic_prices_hold_off_while_a_reward_screen_is_priced(qapp):
+    """The Relics page fetches ~600 prices (about 7 minutes) through the same rate limit as the reward
+    overlay, so a fissure right after looking at relics got its prices late. They wait for the overlay."""
+    from voidtrace import market
+    from voidtrace.ui.relics import RelicPrices
+
+    asked = []
+    data = RelicPrices(ITEMS, SimpleNamespace(get_price=lambda slug: asked.append(slug)))
+    market.idle.clear()
+    try:
+        worker = threading.Thread(target=data._fetch, args=("braton_prime_stock",))
+        worker.start()
+        worker.join(0.2)
+        assert asked == [] and worker.is_alive()
+    finally:
+        market.idle.set()
+    worker.join(1.0)
+    assert asked == ["braton_prime_stock"]
+
+
 def test_refilling_a_full_table_stays_fast(qapp):
     """Refilling a table that already had rows re-measured every row for each new cell: 200 rows took
     13 s, 752 froze the window for minutes."""

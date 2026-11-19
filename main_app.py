@@ -29,10 +29,11 @@ from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from voidtrace.cv_cleaner import TesseractNotFound, capture_screen, warframe_is_foreground
-from voidtrace.debug_log import DebugChannelBusy, DebugLogSource, find_warframe_pid
+from voidtrace.debug_log import DebugChannelBusy, DebugLogSource, LiveWhenFree, find_warframe_pid
 from voidtrace import app_support, cv_cleaner, disclaimer, hotkey, online_status, settings, theme, trade_toast
 from voidtrace.icons import voidtrace_logo
 from voidtrace.items import default_cache_dir, load_catalog, load_items
+from voidtrace.market import idle as market_idle
 from voidtrace.ui.market import MarketSection
 from voidtrace.rivens import RivenService, load_riven_catalog
 from voidtrace.sellers import SellerService
@@ -93,13 +94,15 @@ class Controller(QObject):
             log.info("reward screen closed before capture; skipping")
             return
         if self.busy:
+            log.info("still busy with the last reward screen; skipping this one")
             return
         self.busy = True
         self.executor.submit(self._work, frame, generation)
 
     def _work(self, frame, generation: int) -> None:
+        market_idle.clear()  # background price fetches wait until this screen is priced
         try:
-            cards = self.pipeline.read(frame)
+            cards = self.pipeline.read(frame, still_open=lambda: generation == self.generation)
             self.results_ready.emit(generation, cards)  # names + ducats first
             self.pipeline.price_cards(cards, on_update=lambda updated: self.results_ready.emit(generation, updated))
         except PipelineSkipped as exc:
@@ -110,6 +113,7 @@ class Controller(QObject):
             log.exception("pipeline error")
             self.failed.emit(repr(exc))
         finally:
+            market_idle.set()
             self.busy = False
 
     def _on_results(self, generation: int, cards: list[RewardCard]) -> None:
@@ -135,6 +139,8 @@ def make_line_source(kind: str, path: Path):
             if kind == "debug":
                 raise
             log.warning("live debug output unavailable (%s); falling back to %s, which can lag", exc, path)
+            if isinstance(exc, DebugChannelBusy):  # the other listener may close later
+                return LiveWhenFree(LogTailer(path, start_at_eof=True))
     return LogTailer(path, start_at_eof=True)
 
 
@@ -333,6 +339,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     controller = Controller(pipeline, overlay, int(args.delay * 1000))
 
+    from voidtrace.ui.ducats import DucatSection
     from voidtrace.ui.main_window import MainWindow
     from voidtrace.ui.relics import RelicSection
     from voidtrace.ui.rivens import RivenSection
@@ -352,7 +359,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     from voidtrace.discord import DiscordNotifier
 
     discord = DiscordNotifier()
-    window = MainWindow(market, RelicSection(reward_items, pipeline.prices), riven_data,
+    window = MainWindow(market, RelicSection(reward_items, pipeline.prices), DucatSection(market.catalog), riven_data,
                         lambda data: RivenSection(*data, account=market.account), discord=discord)
 
     def my_name():
@@ -427,7 +434,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     def game_log_status() -> Optional[str]:
         if watcher is None:
             return None
-        if isinstance(watcher.source, DebugLogSource):
+        if isinstance(getattr(watcher.source, "current", watcher.source), DebugLogSource):
             return "live game log in use by this VoidTrace"
         return ("FAIL: using the slower log file: another program (WFInfo, Overwolf, DebugView) "
                 "was reading the game's log when VoidTrace started")

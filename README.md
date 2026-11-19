@@ -130,6 +130,11 @@ Cached prices show up right away and fresh ones load in the background. The very
 Vaulted takes a few minutes. Relic contents come from the Public Export and vaulted status from
 Warframe.Market. Run `python tools/update_relics.py` to refresh `voidtrace/data/relics.json`.
 
+## Ducanator
+
+Best value: prime parts sorted by ducats per plat, so you can see what's cheapest to buy for Baro.
+Prices come from Warframe.Market's daily ducat stats.
+
 ## Online status (optional, off by default)
 
 Tray > Show me in game on Warframe.Market while playing. When you're signed in, it sets your status

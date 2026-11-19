@@ -193,12 +193,12 @@ class StatusKeeper(QObject):
     def stop(self) -> None:
         """VoidTrace is quitting: put your status back now (a few seconds at most)."""
         self.timer.stop()
+        self.executor.shutdown(wait=True, cancel_futures=True)  # a change still on its way must land first
         token = self.token()
-        if self.shown == "ingame" and token:
+        if (self.shown == "ingame" or self.busy) and token:  # busy: its answer never reached _on_done
             try:
                 self.client.set(token, self.back_to())
                 self.shown = self.back_to()
                 log.info("Warframe.Market status put back to %s", self.shown)
             except Exception as exc:
                 log.warning("could not put the Warframe.Market status back (it expires within the hour): %s", exc)
-        self.executor.shutdown(wait=False, cancel_futures=True)

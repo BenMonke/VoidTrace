@@ -22,7 +22,7 @@ from ..icons import chest_icon, ducat_icon, platinum_icon
 from ..items import Item
 from ..price_cleaner import PriceService
 from ..relics import ERAS, REFINEMENTS, Relic, Reward, chance, load_relics, relic_value, search_relics
-from .. import theme
+from .. import market, theme
 from .widgets import Section, header_bar, make_cell, make_table, search_field, set_rows, show_sort, skeleton_cell
 
 log = logging.getLogger(__name__)
@@ -115,6 +115,7 @@ class RelicPrices(QObject):
         return len(self.requested) - len(self.pending), len(self.requested)
 
     def _fetch(self, slug: str) -> None:
+        market.idle.wait()  # a reward screen is being priced: let it go first
         try:
             stats = self.prices.get_price(slug)
         except Exception as exc:
@@ -210,7 +211,7 @@ class RelicTablePage(QWidget):
             values[col] = (value, missing)
         priced = [(self.data.plat_of(r), r.name) for r in relic.rewards]
         known = [(p, n) for p, n in priced if p is not None]
-        best = max(known)[1] if known and len(known) == len(priced) else "\…"  # \…: still loading
+        best = max(known)[1] if known and len(known) == len(priced) else "…"  # …: still loading
         return {"relic": relic, "values": values, "best": best}
 
     def sort_value(self, row: dict, column: int):
@@ -223,7 +224,7 @@ class RelicTablePage(QWidget):
         if column == self.ERA:
             return (ERAS.index(relic.era) if relic.era in ERAS else len(ERAS), relic.name)
         if column == self.BEST:
-            return None if row["best"] == "\…" else row["best"]
+            return None if row["best"] == "…" else row["best"]
         value, missing = row["values"][column]
         return None if missing else value
 
@@ -257,13 +258,13 @@ class RelicTablePage(QWidget):
                     cell.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(i, col, cell)
             best = row["best"]
-            self.table.setItem(i, self.BEST, skeleton_cell(120) if best == "\…" and loading else make_cell(best))
+            self.table.setItem(i, self.BEST, skeleton_cell(120) if best == "…" and loading else make_cell(best))
         self.table.setUpdatesEnabled(True)
         done, asked = self.data.progress()
         missing = any(row["values"][self.RADIANT][1] for row in self.rows)
         failed = missing and not (asked - done)
         if asked - done:
-            text = f"Loading prices {done}/{asked}\…"
+            text = f"Loading prices {done}/{asked}…"
         elif failed:
             text = "Some prices couldn't load (marked *)"
         else:

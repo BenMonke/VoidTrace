@@ -97,6 +97,11 @@ class FakeRivens(Section):
         self.calls.append(("frame", frame))
 
 
+class FakeDucatClient:
+    def get_v1(self, path):
+        return {"previous_day": []}
+
+
 def make_window(prices=None, last=None):
     from voidtrace.ui.main_window import MainWindow
     from voidtrace.ui.market import MarketSection
@@ -107,7 +112,10 @@ def make_window(prices=None, last=None):
     market = MarketSection([item], FakeSellers(), account=FakeAccount())
     relics = RelicSection(ITEMS, prices or FakePrices(), [OPEN, OLD])
     rivens = FakeRivens()
-    return MainWindow(market, relics, load_riven_data=lambda: "d", make_rivens=lambda d: rivens), rivens
+    from voidtrace.ui.ducats import DucatSection
+
+    ducats = DucatSection([], client=FakeDucatClient())
+    return MainWindow(market, relics, ducats, load_riven_data=lambda: "d", make_rivens=lambda d: rivens), rivens
 
 
 def wait(qapp, cond, timeout=3.0):

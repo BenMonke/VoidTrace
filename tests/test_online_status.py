@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -153,3 +154,20 @@ def test_quit_puts_status_back(qapp):
     run(qapp, keeper)
     keeper.stop()
     assert sock.current == "online"
+
+
+def test_quit_waits_for_a_change_still_on_its_way(qapp):
+    """Quitting while "in game" was still being sent: the reset went out first, then the late "in game"
+    landed and showed you in game for up to an hour."""
+    sent = []
+
+    class SlowClient:
+        def set(self, token, status, duration=None):
+            time.sleep(0.2)
+            sent.append(status)
+            return "online"
+
+    keeper = StatusKeeper(lambda: "tok", lambda: True, lambda: True, SlowClient())
+    keeper.tick()  # "in game" goes out on the worker thread
+    keeper.stop()
+    assert sent == ["ingame", "invisible"]

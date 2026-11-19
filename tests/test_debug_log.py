@@ -119,3 +119,48 @@ def test_process_name_of_this_process():
     if sys.platform == "win32":
         assert process_name(os.getpid()).lower().startswith("python")
     assert process_name(0) in ("", None)
+
+
+class FakeTailer:
+    """Stands in for the EE.log tailer: hands out queued batches."""
+    def __init__(self, *batches):
+        self.batches = list(batches)
+        self.closed = False
+
+    def poll(self):
+        return self.batches.pop(0) if self.batches else []
+
+    def close(self):
+        self.closed = True
+
+
+def test_switches_to_live_output_once_the_channel_frees_up():
+    """Another program held the debug channel at startup, so VoidTrace read EE.log for the
+    whole session and 21 of 32 reward screens were skipped as 15 s late. Keep retrying the live channel."""
+    from voidtrace.debug_log import DebugChannelBusy, LiveWhenFree
+
+    now = [0.0]
+    attempts = []
+    live = FakeTailer(["live line"])
+    live.blocks = True
+
+    def open_live():
+        attempts.append(now[0])
+        if len(attempts) == 1:
+            raise DebugChannelBusy("WFInfo")
+        return live
+
+    tailer = FakeTailer(["file line 1"], ["file line 2"], ["file line 3"])
+    src = LiveWhenFree(tailer, open_live=open_live, retry_s=10.0, clock=lambda: now[0])
+    assert not src.live and not src.blocks
+    assert src.poll() == ["file line 1"] and attempts == []  # no retry before retry_s
+    now[0] = 10.0
+    assert src.poll() == ["file line 2"] and attempts == [10.0] and not src.live  # still busy
+    now[0] = 15.0
+    assert src.poll() == ["file line 3"] and attempts == [10.0]  # waits a full retry_s again
+    now[0] = 20.0
+    assert src.poll() == []  # switched: the file's last lines were read first, then the file closed
+    assert src.live and src.blocks and tailer.closed
+    assert src.poll() == ["live line"]
+    src.close()
+    assert live.closed

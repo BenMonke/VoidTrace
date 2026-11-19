@@ -200,9 +200,8 @@ class LogWatcher:
     ) -> None:
         if source is None:
             source = LogTailer(path, poll_interval=poll_interval, start_at_eof=True)
-        self._source = source
         self.source = source  # read by the self-test to report which log is in use
-        self._idle_sleep = 0.0 if getattr(source, "blocks", False) else poll_interval
+        self._poll_interval = poll_interval
         self._on_event = on_event
         self._on_line = on_line
         self._filter = DebouncedFilter(debounce)
@@ -223,15 +222,15 @@ class LogWatcher:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout)
-        self._source.close()
+        self.source.close()
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            batch = self._source.poll()
+            batch = self.source.poll()
             if batch:
                 self.handle_batch(batch)
-            elif self._idle_sleep:
-                time.sleep(self._idle_sleep)
+            elif not getattr(self.source, "blocks", False):  # read every loop: LiveWhenFree can switch
+                time.sleep(self._poll_interval)
 
     def handle_batch(self, batch: list[str]) -> None:
         stamps = [s for s in (game_time(line) for line in batch) if s is not None]

@@ -23,6 +23,10 @@ HEADERS = {
 }
 MIN_INTERVAL = 0.35  # seconds between listing requests
 CONTRACT_INTERVAL = 6.0  # seconds between riven auction requests
+# Cleared while a reward screen is being read and priced. Bulk background fetches (the Relics page's
+# ~600 prices) wait on it, so the overlay's few requests aren't queued behind them.
+idle = threading.Event()
+idle.set()
 
 
 class MarketClient:

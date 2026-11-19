@@ -189,6 +189,15 @@ def test_apply_then_undo():
     assert account.calls == [("update", "a", {"quantity": 3}), ("create", "id-volt", "sell", 25, 1, None, False)]
 
 
+def test_undo_keeps_going_and_returns_what_it_could_not_put_back():
+    """Undo stopped at the first error: later orders stayed changed and the toast couldn't say which."""
+    lower = OrderChange(order("a", "id-hp", quantity=3, rank=5), "Hollow Point", 1)
+    remove = OrderChange(order("b", "id-volt", quantity=1, platinum=25, visible=False), "Volt", 1)
+    account = FakeAccount(fail={"a"})
+    assert undo(account, [lower, remove]) == [lower]
+    assert account.calls == [("create", "id-volt", "sell", 25, 1, None, False)]
+
+
 def test_a_refused_change_is_left_out():
     change = OrderChange(order("a", "id-hp", quantity=3), "Hollow Point", 1)
     assert apply_changes(FakeAccount(fail={"a"}), [change]) == []

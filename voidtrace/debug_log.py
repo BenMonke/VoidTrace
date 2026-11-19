@@ -234,3 +234,41 @@ class DebugLogSource:
         self._stop.set()
         self._collector.join(1.0)
         self._channel.close()
+
+
+LIVE_RETRY_S = 10.0
+
+
+class LiveWhenFree:
+    """Reads the EE.log tailer while another listener (WFInfo, DebugView) holds the debug channel, and
+    keeps trying to take it over. Checking only at startup left a whole session on the file, where
+    most reward triggers arrive 15 s late and get skipped."""
+
+    def __init__(self, fallback, open_live: Callable[[], object] = DebugLogSource,
+                 retry_s: float = LIVE_RETRY_S, clock: Callable[[], float] = time.monotonic) -> None:
+        self.current = fallback
+        self.live = False
+        self._open_live = open_live
+        self._retry_s = retry_s
+        self._clock = clock
+        self._next_try = clock() + retry_s
+
+    @property
+    def blocks(self) -> bool:
+        return getattr(self.current, "blocks", False)
+
+    def poll(self) -> list[str]:
+        lines = self.current.poll()
+        if not self.live and self._clock() >= self._next_try:
+            try:
+                source = self._open_live()
+            except (DebugChannelBusy, OSError):
+                self._next_try = self._clock() + self._retry_s
+            else:
+                self.current.close()
+                self.current, self.live = source, True
+                log.info("debug channel is free now; switched to Warframe's live debug output")
+        return lines
+
+    def close(self) -> None:
+        self.current.close()

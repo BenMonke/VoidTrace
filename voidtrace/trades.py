@@ -220,14 +220,21 @@ def apply_changes(account: Account, changes: Sequence[OrderChange]) -> list[Orde
     return done
 
 
-def undo(account: Account, changes: Sequence[OrderChange]) -> None:
-    """Put the orders back as they were (a deleted order is posted again with the same details)."""
+def undo(account: Account, changes: Sequence[OrderChange]) -> list[OrderChange]:
+    """Put the orders back as they were (a deleted order is posted again with the same details).
+    Returns the ones that could not be put back; one failing does not stop the rest."""
+    failed = []
     for change in changes:
         o = change.order
-        if change.deletes:
-            account.create_order(o.item_id, o.type, o.platinum, o.quantity, o.rank, o.visible)
-        else:
-            account.update_order(o.id, quantity=o.quantity)
+        try:
+            if change.deletes:
+                account.create_order(o.item_id, o.type, o.platinum, o.quantity, o.rank, o.visible)
+            else:
+                account.update_order(o.id, quantity=o.quantity)
+        except Exception as exc:
+            log.warning("trade: could not put the %s order back: %s", change.item_name, exc)
+            failed.append(change)
+    return failed
 
 
 def summary(trade: Trade, changes: Sequence[OrderChange]) -> str:

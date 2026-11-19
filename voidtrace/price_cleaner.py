@@ -307,7 +307,7 @@ class PriceService:
         # lock only spaces their start times to respect the rate limit.
         with ThreadPoolExecutor(max_workers=2) as pool:
             orders_future = pool.submit(self.client.get, f"/orders/item/{slug}")
-            stats_future = pool.submit(self._statistics, slug)
+            stats_future = pool.submit(self.sales, slug)  # kept in memory: a repeat item skips this call
             try:
                 orders = orders_future.result()
             except Exception as exc:

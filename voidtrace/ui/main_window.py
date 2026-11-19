@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (QButtonGroup, QColorDialog, QFrame, QHBoxLayout, QL
 
 from .. import online_status, settings, svg_icons
 from .. import theme as T
+from .ducats import DucatSection
 from .market import MarketSection
 from .relics import RelicSection
 from .rivens import RivenSection
@@ -31,7 +32,8 @@ log = logging.getLogger(__name__)
 
 SECTIONS = (("market", "Market", MarketSection.PAGES),
             ("rivens", "Rivens", RivenSection.PAGES),
-            ("relics", "Relics", RelicSection.PAGES))
+            ("relics", "Relics", RelicSection.PAGES),
+            ("ducats", "Ducanator", DucatSection.PAGES))
 PAGE_KEYS = [f"{section}/{page}" for section, _title, pages in SECTIONS for page in pages]
 DEFAULT_PAGE = "market/buy"
 DEFAULT_SIZE = (1280, 800)
@@ -185,7 +187,7 @@ class MainWindow(QWidget):
     _rivens_loaded = pyqtSignal(object)
     _rivens_failed = pyqtSignal(str)
 
-    def __init__(self, market: MarketSection, relics: RelicSection,
+    def __init__(self, market: MarketSection, relics: RelicSection, ducats: DucatSection,
                  load_riven_data: Callable[[], object], make_rivens: Callable[[object], Section],
                  discord=None) -> None:
         super().__init__()
@@ -193,7 +195,7 @@ class MainWindow(QWidget):
         # a normal window: the hotkey still raises it, but other apps can go on top of it
         self.setWindowFlags(Qt.WindowType.Window)
         T.follow(self, STYLE + BUTTON_STYLE + SHELL_STYLE)
-        self.market, self.relics = market, relics
+        self.market, self.relics, self.ducats = market, relics, ducats
         self.account = market.account
         self.load_riven_data, self.make_rivens = load_riven_data, make_rivens
         self._rivens: Optional[Section] = None
@@ -217,8 +219,6 @@ class MainWindow(QWidget):
             tile.installEventFilter(self)
             self._tile_group.addButton(tile)
             self.tiles[name] = tile
-        self.ducats_tile = RailTile("ducats", "Ducanator (coming soon)")
-        self.ducats_tile.setCursor(Qt.CursorShape.ArrowCursor)
         self.discord_button = RailTile("bell", "Discord notifications")
         self.discord_button.setVisible(discord is not None)
         self.discord_button.clicked.connect(lambda: self._open_discord(discord))
@@ -247,7 +247,7 @@ class MainWindow(QWidget):
         left.addSpacing(8)
         left.addWidget(divider, 0, Qt.AlignmentFlag.AlignHCenter)
         left.addSpacing(8)
-        for tile in (*self.tiles.values(), self.ducats_tile):
+        for tile in self.tiles.values():
             left.addWidget(tile, 0, Qt.AlignmentFlag.AlignHCenter)
         left.addStretch(1)
         for tile in (self.discord_button, self.settings_button, self.account_button):
@@ -293,10 +293,11 @@ class MainWindow(QWidget):
 
         self.riven_placeholder = RivenPlaceholder(lambda: self.show_page(self._current))
         self.stack = QStackedWidget()
-        for widget in (market, relics, self.riven_placeholder):
+        for widget in (market, relics, ducats, self.riven_placeholder):
             self.stack.addWidget(widget)
-        for section in (market, relics):
+        for section in (market, relics, ducats):
             self._watch(section)
+        ducats.open_item.connect(self.open_item)
 
         content = QVBoxLayout()
         content.setContentsMargins(T.SPACE_6, T.SPACE_8, T.SPACE_6, T.SPACE_6)
@@ -329,7 +330,7 @@ class MainWindow(QWidget):
     # --- pages ------------------------------------------------------------------------------------
 
     def section(self, name: str) -> Optional[Section]:
-        return {"market": self.market, "relics": self.relics, "rivens": self._rivens}.get(name)
+        return {"market": self.market, "relics": self.relics, "ducats": self.ducats, "rivens": self._rivens}.get(name)
 
     def rivens(self) -> Optional[Section]:
         return self._rivens
@@ -425,7 +426,7 @@ class MainWindow(QWidget):
                 widget.show()
 
     def _watch(self, section: Section) -> None:
-        name = next(n for n in ("market", "relics", "rivens") if self.section(n) is section)
+        name = next(n for n in ("market", "relics", "ducats", "rivens") if self.section(n) is section)
         section.account_switched.connect(self.account_changed)
         section.page_changed.connect(lambda page, n=name: self._section_moved(f"{n}/{page}"))
 
@@ -514,7 +515,7 @@ class MainWindow(QWidget):
 
     def _retint(self) -> None:
         self.logo.setPixmap(svg_icons.logo(T.accent_hex(), T.TEXT_PRIMARY, 32))
-        for tile in (*self.tiles.values(), self.ducats_tile, self.discord_button, self.settings_button):
+        for tile in (*self.tiles.values(), self.discord_button, self.settings_button):
             tile.retint()
 
     def _accent_changed(self) -> None:
@@ -572,7 +573,7 @@ class MainWindow(QWidget):
         """Signed in or out somewhere: update the avatar and every other section."""
         origin = self.sender()
         self.refresh_account_button()
-        for name in ("market", "rivens", "relics"):
+        for name in ("market", "rivens", "relics", "ducats"):
             section = self.section(name)
             if section is not None and section is not origin:
                 section.refresh_account()
@@ -599,7 +600,7 @@ class MainWindow(QWidget):
         self.hide()
 
     def shutdown(self) -> None:
-        for name in ("market", "rivens", "relics"):
+        for name in ("market", "rivens", "relics", "ducats"):
             section = self.section(name)
             if section is not None:
                 section.shutdown()

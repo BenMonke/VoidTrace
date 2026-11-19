@@ -77,21 +77,23 @@ class RewardPipeline:
         self.ui_scale = ui_scale
         self.foreground_check = foreground_check
 
-    def read(self, frame: Optional[np.ndarray] = None) -> list[RewardCard]:
-        """Capture (unless given a frame), OCR and resolve. Prices are left pending."""
+    def read(self, frame: Optional[np.ndarray] = None,
+             still_open: Callable[[], bool] = lambda: True) -> list[RewardCard]:
+        """Capture (unless given a frame), OCR and resolve. Prices are left pending. `still_open` says
+        whether the reward screen is still up; once it closes, capturing stops."""
         t0 = time.perf_counter()
         live = frame is None
         if live:
             if self.foreground_check is not None and not self.foreground_check():
                 raise PipelineSkipped("Warframe is not the active window")
-            frame = self.capture_settled()
+            frame = self.capture_settled(still_open)
             cv_cleaner.keep_capture(frame, "relic")
         t1 = time.perf_counter()
         texts = self.read_texts(frame, self.players, self.ui_scale)
         resolutions = self.resolver.resolve_all(texts)
         log.info("timing: capture %.2fs, OCR + resolve %.2fs", t1 - t0, time.perf_counter() - t1)
         retries = 0
-        while live and retries < MAX_RETRIES and any(_weak(r) for r in resolutions):
+        while live and retries < MAX_RETRIES and still_open() and any(_weak(r) for r in resolutions):
             retries += 1
             time.sleep(RETRY_DELAY_S)
             again = self.resolver.resolve_all(self.read_texts(self.capture(), self.players, self.ui_scale))
@@ -106,12 +108,14 @@ class RewardPipeline:
         ]
         return mark_best(cards)
 
-    def capture_settled(self) -> np.ndarray:
+    def capture_settled(self, still_open: Callable[[], bool] = lambda: True) -> np.ndarray:
         """Capture once the reward names stop changing (cards finished fading in)."""
         t0 = time.perf_counter()
         prev, stable, frame, polarity = None, 0, None, None
         while True:
             frame = self.capture()
+            if not still_open():  # the next screen is not worth reading
+                raise PipelineSkipped("reward screen closed while capturing")
             if polarity is None:  # decided once: per-grab decisions can flip on a busy background
                 polarity = cv_cleaner.text_polarity(_band(frame, self.ui_scale), upscale=1.0)
             sig = cv_cleaner.band_text_signature(_band(frame, self.ui_scale), polarity)

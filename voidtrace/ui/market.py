@@ -82,7 +82,7 @@ class MarketSection(Section):
         self.rank.hide()  # shown once a ranked item is open
         self.online = QCheckBox("Include online sellers")
         self.online.setChecked(True)
-        self.alert_button = QPushButton("Alert me\…")
+        self.alert_button = QPushButton("Alert me…")
         self.alert_button.setToolTip("Tell me when someone sells this at or under a price")
         self.alert_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.alert_button.setEnabled(False)  # until an item is picked
@@ -261,7 +261,7 @@ class MarketSection(Section):
         if overpay is not None and len(paid) == 1:  # with "Any rank" each rank has its own price: tooltips only
             self.status.setText(f"{paid_text(overpay)} {self.status.text()}")
         if not rows:
-            self.table.state.message("Nobody's selling this right now", "info", button="Alert me\…",
+            self.table.state.message("Nobody's selling this right now", "info", button="Alert me…",
                                      on_click=self._ask_alert)
 
     def _label_ranks(self, counts: dict) -> None:

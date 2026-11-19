@@ -243,11 +243,10 @@ class TradeTracker(QObject):
         return done
 
     def undo(self, changes: Sequence[OrderChange]) -> None:
-        try:
-            undo(self.account, changes)
-        except Exception as exc:
-            log.warning("trade: undo failed: %s", exc)
-            self.note.emit(f"Could not put the orders back: {exc}")
+        failed = undo(self.account, changes)
+        if failed:
+            names = ", ".join(c.item_name for c in failed)
+            self.note.emit(f"Could not put these back: {names}. Fix them on Warframe.Market.")
             return
         log.info("trade: undid %d order change(s)", len(changes))
         self.note.emit("Orders put back as they were.")

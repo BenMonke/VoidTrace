@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication, QLabel
 
 from voidtrace import settings
 from voidtrace.items import CatalogItem
+from voidtrace.ui.ducats import DucatSection
 from voidtrace.ui.main_window import MainWindow
 from voidtrace.ui.market import MarketSection
 from voidtrace.ui.relics import RelicSection
@@ -17,10 +18,10 @@ from voidtrace.ui.widgets import Section
 
 LABELS = ["Buy", "Sell", "My orders", "Trades", "Alerts",
           "Find", "Price check", "Sell", "My rivens",
-          "Unvaulted", "Vaulted", "Look up"]
+          "Unvaulted", "Vaulted", "Look up", "Best value"]
 KEYS = ["market/buy", "market/sell", "market/orders", "market/trades", "market/alerts",
         "rivens/find", "rivens/price", "rivens/sell", "rivens/mine",
-        "relics/unvaulted", "relics/vaulted", "relics/lookup"]
+        "relics/unvaulted", "relics/vaulted", "relics/lookup", "ducats/best"]
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +42,11 @@ class FakeAccount:
 
     def sign_out(self):
         self.signed_in = False
+
+
+class FakeDucatClient:
+    def get_v1(self, path):
+        return {"previous_day": []}
 
 
 class FakeSellers:
@@ -69,7 +75,7 @@ def make_window(load=lambda: "data", account=None):
     market = MarketSection([CatalogItem("Volt Prime Set", "volt_prime_set", None, ("set",), "id")],
                            FakeSellers(), account=account)
     relics = RelicSection([], prices=None, relics=[])
-    window = MainWindow(market, relics, load_riven_data=load, make_rivens=lambda data: FakeRivens(account))
+    window = MainWindow(market, relics, DucatSection([], client=FakeDucatClient()), load_riven_data=load, make_rivens=lambda data: FakeRivens(account))
     return window, account
 
 
@@ -85,7 +91,7 @@ def test_tabs_list_every_page_in_order(qapp):
     window, _ = make_window()
     assert window.tab_labels() == LABELS
     assert window.tab_keys() == KEYS
-    assert list(window.tiles) == ["market", "rivens", "relics"]
+    assert list(window.tiles) == ["market", "rivens", "relics", "ducats"]
 
 
 def test_clicking_a_page_shows_it(qapp):
